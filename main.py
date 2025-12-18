@@ -5,7 +5,7 @@ import numpy as np
 import cv2
 import mss
 import imagehash
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 # --- PyQt5 라이브러리 ---
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
@@ -411,17 +411,74 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "PDF 저장", "악보.pdf", "PDF Files (*.pdf)")
         if path:
             try:
-                images = [Image.open(f).convert("RGB") for f in valid_files]
-                if images:
-                    images[0].save(path, save_all=True, append_images=images[1:])
-                    QMessageBox.information(self, "성공", "PDF가 저장되었습니다!")
+                self.status_label.setText("PDF 생성 중...")
+                
+                # 1. 이미지 객체 로드
+                image_objects = [Image.open(f).convert("RGB") for f in valid_files]
+                
+                # 2. A4 비율 설정 (이미지 가로 크기 기준)
+                base_width = image_objects[0].width
+                a4_ratio = 297 / 210  # A4 세로/가로 비율
+                page_height = int(base_width * a4_ratio)
+
+                final_pages = []
+                current_page = Image.new('RGB', (base_width, page_height), 'white')
+                y_offset = 0
+
+                # 3. 이미지 이어 붙이기 (페이지가 꽉 차면 다음 장으로)
+                for img in image_objects:
+                    # 너비 불일치 시 리사이징
+                    if img.width != base_width:
+                        new_h = int(img.height * (base_width / img.width))
+                        img = img.resize((base_width, new_h), Image.Resampling.LANCZOS)
+
+                    # 현재 페이지 남은 공간 확인
+                    if y_offset + img.height > page_height:
+                        final_pages.append(current_page)
+                        current_page = Image.new('RGB', (base_width, page_height), 'white')
+                        y_offset = 0
                     
+                    current_page.paste(img, (0, y_offset))
+                    y_offset += img.height
+                
+                final_pages.append(current_page) # 마지막 페이지 추가
+
+                # 4. 페이지 번호 삽입 (하단 중앙)
+                total_pages = len(final_pages)
+                pages_with_numbers = []
+                try:
+                    # 시스템 폰트 시도 (arial), 실패 시 기본 폰트
+                    font = ImageFont.truetype("arial.ttf", size=max(14, int(base_width/40)))
+                except IOError:
+                    font = ImageFont.load_default()
+
+                for i, page in enumerate(final_pages, 1):
+                    draw = ImageDraw.Draw(page)
+                    page_num_text = f"{i} / {total_pages}"
+                    
+                    # 텍스트 크기 계산하여 중앙 배치
+                    bbox = draw.textbbox((0, 0), page_num_text, font=font)
+                    text_w = bbox[2] - bbox[0]
+                    text_h = bbox[3] - bbox[1]
+                    
+                    x = (base_width - text_w) / 2
+                    y = page_height - text_h - 10 # 아래쪽 여백 10px
+                    
+                    draw.text((x, y), page_num_text, font=font, fill="black")
+                    pages_with_numbers.append(page)
+
+                # 5. 저장
+                if pages_with_numbers:
+                    pages_with_numbers[0].save(path, save_all=True, append_images=pages_with_numbers[1:])
+                    QMessageBox.information(self, "성공", f"PDF가 저장되었습니다! (총 {total_pages}페이지)")
+                    
+                    # 완료 후 목록 초기화 (사용자 선택)
                     self.captured_files = []
                     self.list_widget.clear()
                     self.image_preview_label.clear()
                     self.btn_pdf.setEnabled(False)
-                else:
-                    QMessageBox.warning(self, "오류", "PDF로 변환할 이미지가 없습니다.")
+                    self.status_label.setText("PDF 저장 완료.")
+                
             except Exception as e:
                 QMessageBox.critical(self, "PDF 저장 오류", f"PDF를 저장하는 중 오류가 발생했습니다:\n{e}")
 
