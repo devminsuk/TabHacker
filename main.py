@@ -13,81 +13,15 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QGroupBox, QListWidget, QMessageBox, QFileDialog,
                              QSplitter, QFrame, QSizePolicy, QAbstractItemView)
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QUrl, QRect, QRectF, QSize, QPoint
-from PyQt5.QtGui import QPainter, QColor, QPen, QImage, QPixmap, QPainterPath
+from PyQt5.QtCore import Qt, pyqtSignal, QUrl, QRect, QRectF, QSize, QPoint, QTimer
+from PyQt5.QtGui import QPainter, QColor, QPen, QImage, QPixmap, QPainterPath, QRegion
 
 from skimage.metrics import structural_similarity as compare_ssim
 
 # --- 설정 ---
 OUTPUT_FOLDER = "captured_scores"
 
-class CaptureThread(QThread):
-    """백그라운드에서 화면을 감시하고 캡처하는 스레드"""
-    log_signal = pyqtSignal(str)
-    preview_signal = pyqtSignal(str)
 
-    def __init__(self, capture_area, similarity_threshold, delay):
-        super().__init__()
-        self.capture_area = capture_area
-        self.similarity_threshold = float(similarity_threshold)
-        self.delay = int(delay)
-        self.running = False
-        self.last_captured_gray = None
-        self.last_hash = None
-        self.captured_files = []
-
-        if not os.path.exists(OUTPUT_FOLDER):
-            os.makedirs(OUTPUT_FOLDER)
-
-    def run(self):
-        self.running = True
-        for i in range(self.delay, 0, -1):
-            if not self.running: return
-            self.log_signal.emit(f"{i}초 후 캡처 시작...")
-            time.sleep(1)
-
-        self.log_signal.emit("캡처 감시 중... (중지 버튼으로 종료)")
-
-        with mss.mss() as sct:
-            while self.running:
-                try:
-                    sct_img = sct.grab(self.capture_area)
-                    img_np = np.array(sct_img)
-                    img_bgr = cv2.cvtColor(img_np, cv2.COLOR_BGRA2BGR)
-                    img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-                except Exception as e:
-                    self.log_signal.emit(f"캡처 오류: {e}")
-                    break
-
-                should_save = False
-                
-                if self.last_captured_gray is None:
-                    should_save = True
-                    self.log_signal.emit("첫 페이지 캡처!")
-                else:
-                    score, _ = compare_ssim(self.last_captured_gray, img_gray, full=True)
-                    if score < self.similarity_threshold:
-                        self.log_signal.emit(f"페이지 넘김 감지 (유사도: {score:.2f})")
-                        should_save = True
-
-                if should_save:
-                    pil_img = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
-                    curr_hash = imagehash.phash(pil_img)
-
-                    if self.last_hash is None or (curr_hash - self.last_hash > 5):
-                        filename = os.path.join(OUTPUT_FOLDER, f"score_{len(self.captured_files)+1:03d}.png")
-                        cv2.imwrite(filename, img_bgr)
-                        self.captured_files.append(filename)
-                        
-                        self.last_captured_gray = img_gray
-                        self.last_hash = curr_hash
-                        self.preview_signal.emit(filename)
-
-                time.sleep(1.0) 
-
-    def stop(self):
-        self.running = False
-        self.wait()
 
 class SelectionOverlay(QWidget):
     """개선된 영역 선택 오버레이: 마스킹 효과 및 방향키 조절, 테두리 유지 기능"""
@@ -195,6 +129,14 @@ class MainWindow(QMainWindow):
         self.resize(1300, 850)
         self.capture_area_dict = None
         self.captured_files = []
+
+        # --- 캡처 로직 관련 멤버 변수 ---
+        self.capture_timer = QTimer(self)
+        self.capture_timer.timeout.connect(self.perform_capture)
+        self.last_captured_gray = None
+        self.last_hash = None
+        self.countdown_value = -1
+
         self.setup_ui()
 
     def setup_ui(self):
@@ -320,18 +262,113 @@ class MainWindow(QMainWindow):
         if not self.capture_area_dict:
             QMessageBox.warning(self, "오류", "영역을 먼저 선택하세요.")
             return
-        self.btn_start.setEnabled(False); self.btn_select.setEnabled(False); self.btn_stop.setEnabled(True); self.btn_pdf.setEnabled(False)
-        self.thread = CaptureThread(self.capture_area_dict, self.sensitivity_input.text(), self.delay_input.text())
-        self.thread.log_signal.connect(self.status_label.setText); self.thread.preview_signal.connect(self.add_capture_item); self.thread.start()
+
+        self.btn_start.setEnabled(False)
+        self.btn_select.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self.btn_pdf.setEnabled(False)
+        
+        self.captured_files = []
+        self.list_widget.clear()
+        self.image_preview_label.clear()
+        self.last_captured_gray = None
+        self.last_hash = None
+
+        if not os.path.exists(OUTPUT_FOLDER):
+            os.makedirs(OUTPUT_FOLDER)
+
+        delay_sec = int(self.delay_input.text())
+        
+        QTimer.singleShot(delay_sec * 1000, self.start_timed_capture)
+
+        self.countdown_value = delay_sec
+        self.update_countdown_label()
+
+    def update_countdown_label(self):
+        if self.capture_timer.isActive() or self.countdown_value < 0:
+            return
+        
+        if self.countdown_value == 0:
+            self.status_label.setText("캡처 감시 중... (중지 버튼으로 종료)")
+        else:
+            self.status_label.setText(f"{self.countdown_value}초 후 캡처 시작...")
+        
+        self.countdown_value -= 1
+        if self.countdown_value >= 0:
+            QTimer.singleShot(1000, self.update_countdown_label)
+    
+    def start_timed_capture(self):
+        if self.btn_stop.isEnabled():
+            self.capture_timer.start(1000)
 
     def stop_capture(self):
-        if hasattr(self, 'thread'): self.thread.stop()
-        self.btn_start.setEnabled(True); self.btn_select.setEnabled(True); self.btn_stop.setEnabled(False); self.btn_pdf.setEnabled(True)
+        self.capture_timer.stop()
+        self.countdown_value = -1 
+        self.btn_start.setEnabled(True)
+        self.btn_select.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.btn_pdf.setEnabled(len(self.captured_files) > 0)
         self.status_label.setText("캡처 중지됨.")
+
+    def perform_capture(self):
+        if not self.capture_area_dict:
+            return
+        try:
+            w, h = self.capture_area_dict['width'], self.capture_area_dict['height']
+            source_top_left_global = QPoint(self.capture_area_dict['left'], self.capture_area_dict['top'])
+            source_top_left_local = self.webview.mapFromGlobal(source_top_left_global)
+            source_rect = QRect(source_top_left_local, QSize(w, h))
+
+            img = QImage(QSize(w, h), QImage.Format_ARGB32_Premultiplied)
+            img.fill(Qt.transparent)
+
+            self.overlay.hide()
+            painter = QPainter(img)
+            self.webview.render(painter, QPoint(), QRegion(source_rect))
+            painter.end()
+            self.overlay.show()
+
+            ptr = img.constBits()
+            ptr.setsize(img.sizeInBytes())
+            arr = np.array(ptr).reshape(h, w, 4)
+            img_bgr = cv2.cvtColor(arr, cv2.COLOR_BGRA2BGR)
+            img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+
+        except Exception as e:
+            self.status_label.setText(f"캡처 오류: {e}")
+            self.stop_capture()
+            return
+
+        should_save = False
+        similarity_threshold = float(self.sensitivity_input.text())
+        
+        if self.last_captured_gray is None:
+            should_save = True
+            self.status_label.setText("첫 페이지 캡처!")
+        else:
+            score, _ = compare_ssim(self.last_captured_gray, img_gray, full=True)
+            if score < similarity_threshold:
+                self.status_label.setText(f"페이지 넘김 감지 (유사도: {score:.2f})")
+                should_save = True
+
+        if should_save:
+            pil_img = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
+            curr_hash = imagehash.phash(pil_img)
+
+            if self.last_hash is None or (curr_hash - self.last_hash > 5):
+                filename = os.path.join(OUTPUT_FOLDER, f"score_{len(self.captured_files)+1:03d}.png")
+                cv2.imwrite(filename, img_bgr)
+                self.add_capture_item(filename)
+                
+                self.last_captured_gray = img_gray
+                self.last_hash = curr_hash
 
     def add_capture_item(self, filepath):
         self.captured_files.append(filepath)
-        self.list_widget.addItem(os.path.basename(filepath)); self.list_widget.scrollToBottom(); self.display_image(filepath)
+        self.list_widget.addItem(os.path.basename(filepath))
+        self.list_widget.scrollToBottom()
+        self.display_image(filepath)
+        self.btn_pdf.setEnabled(True)
 
     def show_image_preview(self, item):
         path = os.path.join(OUTPUT_FOLDER, item.text())
@@ -346,21 +383,51 @@ class MainWindow(QMainWindow):
     def delete_selected_item(self):
         row = self.list_widget.currentRow()
         if row >= 0:
-            item = self.list_widget.takeItem(row); full_path = os.path.join(OUTPUT_FOLDER, item.text())
+            item = self.list_widget.takeItem(row)
+            if item is None: return
+            
+            full_path = os.path.join(OUTPUT_FOLDER, item.text())
             if full_path in self.captured_files: self.captured_files.remove(full_path)
-            if os.path.exists(full_path): os.remove(full_path)
-            self.image_preview_label.clear()
+            if os.path.exists(full_path): 
+                try:
+                    os.remove(full_path)
+                except OSError as e:
+                    self.status_label.setText(f"파일 삭제 오류: {e}")
+            
+            if self.list_widget.count() == 0:
+                self.image_preview_label.clear()
+                self.btn_pdf.setEnabled(False)
 
     def create_pdf(self):
-        if not self.captured_files: return
+        if not self.captured_files:
+            QMessageBox.warning(self, "알림", "PDF로 만들 이미지가 없습니다.")
+            return
+
+        valid_files = [f for f in self.captured_files if os.path.exists(f)]
+        if not valid_files:
+            QMessageBox.warning(self, "알림", "캡처된 이미지 파일을 찾을 수 없습니다.")
+            return
+
         path, _ = QFileDialog.getSaveFileName(self, "PDF 저장", "악보.pdf", "PDF Files (*.pdf)")
         if path:
-            images = [Image.open(f).convert("RGB") for f in self.captured_files]
-            images[0].save(path, save_all=True, append_images=images[1:])
-            QMessageBox.information(self, "성공", "PDF가 저장되었습니다!"); self.captured_files = []; self.list_widget.clear(); self.image_preview_label.clear()
+            try:
+                images = [Image.open(f).convert("RGB") for f in valid_files]
+                if images:
+                    images[0].save(path, save_all=True, append_images=images[1:])
+                    QMessageBox.information(self, "성공", "PDF가 저장되었습니다!")
+                    
+                    self.captured_files = []
+                    self.list_widget.clear()
+                    self.image_preview_label.clear()
+                    self.btn_pdf.setEnabled(False)
+                else:
+                    QMessageBox.warning(self, "오류", "PDF로 변환할 이미지가 없습니다.")
+            except Exception as e:
+                QMessageBox.critical(self, "PDF 저장 오류", f"PDF를 저장하는 중 오류가 발생했습니다:\n{e}")
 
     def resizeEvent(self, event):
-        if self.overlay.isVisible(): self.overlay.resize(self.webview.size())
+        if hasattr(self, 'overlay') and self.overlay.isVisible(): 
+            self.overlay.resize(self.webview.size())
         super().resizeEvent(event)
 
 if __name__ == "__main__":
