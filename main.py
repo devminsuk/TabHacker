@@ -10,7 +10,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QLineEdit, 
                              QGroupBox, QListWidget, QMessageBox, QFileDialog,
                              QSplitter, QFrame, QStackedWidget, QScrollArea, 
-                             QFormLayout, QAbstractItemView, QListWidgetItem)
+                             QFormLayout, QAbstractItemView, QListWidgetItem,
+                             QComboBox)
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtCore import Qt, pyqtSignal, QUrl, QRect, QRectF, QSize, QPoint, QTimer
 from PyQt5.QtGui import QPainter, QColor, QPen, QImage, QPixmap, QPainterPath, QRegion, QFont
@@ -599,6 +600,8 @@ class MainWindow(QMainWindow):
         self.last_captured_gray = None
         self.last_hash = None
         self.countdown_value = -1
+        self.scroll_buffer = None
+        self.current_scroll_filename = None
 
         self.setup_ui()
         self.apply_stylesheet()
@@ -656,6 +659,14 @@ class MainWindow(QMainWindow):
         control_layout.setSpacing(6)
         control_layout.setContentsMargins(8, 8, 8, 8)
         
+        # 모드 선택
+        mode_layout = QHBoxLayout()
+        mode_layout.addWidget(QLabel("모드:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["페이지 넘김 (기본)", "가로 스크롤 (이어붙이기)"])
+        mode_layout.addWidget(self.mode_combo, 1)
+        control_layout.addLayout(mode_layout)
+
         # 설정 (가로 배치)
         settings_h = QHBoxLayout()
         settings_h.addWidget(QLabel("민감도:"))
@@ -899,6 +910,8 @@ class MainWindow(QMainWindow):
         self.image_preview_label.setText("캡처 진행 중...")
         self.last_captured_gray = None
         self.last_hash = None
+        self.scroll_buffer = None
+        self.current_scroll_filename = None
         
         if not os.path.exists(OUTPUT_FOLDER):
             os.makedirs(OUTPUT_FOLDER)
@@ -956,41 +969,82 @@ class MainWindow(QMainWindow):
             ptr.setsize(img.sizeInBytes())
             arr = np.array(ptr).reshape(h, w, 4)
             img_bgr = cv2.cvtColor(arr, cv2.COLOR_BGRA2BGR)
-            img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-
-            should_save = False
-            threshold = float(self.sensitivity_input.text())
             
-            if self.last_captured_gray is None:
-                should_save = True
-            else:
-                score, _ = compare_ssim(self.last_captured_gray, img_gray, full=True)
-                if score < threshold:
-                    should_save = True
-
-            if should_save:
-                pil_img = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
-                curr_hash = imagehash.phash(pil_img)
+            # 모드에 따른 분기
+            if self.mode_combo.currentIndex() == 0:
+                # --- 페이지 넘김 모드 (기존 로직) ---
+                img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                should_save = False
+                threshold = float(self.sensitivity_input.text())
                 
-                if self.last_hash is None or (curr_hash - self.last_hash > 5):
+                if self.last_captured_gray is None:
+                    should_save = True
+                else:
+                    score, _ = compare_ssim(self.last_captured_gray, img_gray, full=True)
+                    if score < threshold:
+                        should_save = True
+
+                if should_save:
+                    pil_img = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
+                    curr_hash = imagehash.phash(pil_img)
+                    
+                    if self.last_hash is None or (curr_hash - self.last_hash > 5):
+                        self.capture_counter += 1
+                        filename = os.path.join(OUTPUT_FOLDER, f"score_{self.capture_counter:03d}.png")
+                        cv2.imwrite(filename, img_bgr)
+                        self.captured_files.append(filename)
+                        
+                        item = QListWidgetItem(os.path.basename(filename))
+                        item.setData(Qt.UserRole, filename)
+                        self.list_widget.addItem(item)
+                        self.list_widget.scrollToBottom()
+                        
+                        self.display_image(filename)
+                        self.btn_pdf.setEnabled(True)
+
+                        self.last_captured_gray = img_gray
+                        self.last_hash = curr_hash
+                        
+                        count = len(self.captured_files)
+                        self.status_label.setText(f"캡처 완료 (총 {count}개)")
+            else:
+                # --- 가로 스크롤 모드 (이어붙이기) ---
+                if self.scroll_buffer is None:
+                    self.scroll_buffer = img_bgr
                     self.capture_counter += 1
-                    filename = os.path.join(OUTPUT_FOLDER, f"score_{self.capture_counter:03d}.png")
+                    filename = os.path.join(OUTPUT_FOLDER, f"score_scroll_{self.capture_counter:03d}.png")
+                    self.current_scroll_filename = filename
                     cv2.imwrite(filename, img_bgr)
                     self.captured_files.append(filename)
                     
                     item = QListWidgetItem(os.path.basename(filename))
                     item.setData(Qt.UserRole, filename)
                     self.list_widget.addItem(item)
-                    self.list_widget.scrollToBottom()
-                    
                     self.display_image(filename)
                     self.btn_pdf.setEnabled(True)
-
-                    self.last_captured_gray = img_gray
-                    self.last_hash = curr_hash
-                    
-                    count = len(self.captured_files)
-                    self.status_label.setText(f"캡처 완료 (총 {count}개)")
+                    self.status_label.setText("스크롤 캡처 시작")
+                else:
+                    # 템플릿 매칭으로 겹치는 부분 찾기
+                    template_width = 200
+                    if self.scroll_buffer.shape[1] >= template_width and img_bgr.shape[1] >= template_width:
+                        template = self.scroll_buffer[:, -template_width:]
+                        template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+                        img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                        
+                        res = cv2.matchTemplate(img_gray, template_gray, cv2.TM_CCOEFF_NORMED)
+                        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                        
+                        if max_val > 0.7: # 임계값
+                            match_x = max_loc[0]
+                            new_part_start = match_x + template_width
+                            
+                            if new_part_start < img_bgr.shape[1]:
+                                new_part = img_bgr[:, new_part_start:]
+                                if new_part.shape[1] > 0:
+                                    self.scroll_buffer = np.hstack((self.scroll_buffer, new_part))
+                                    cv2.imwrite(self.current_scroll_filename, self.scroll_buffer)
+                                    self.display_image(self.current_scroll_filename)
+                                    self.status_label.setText(f"이어붙이기 중... (폭: {self.scroll_buffer.shape[1]}px)")
                     
         except Exception as e:
             print(f"Capture Error: {e}")
