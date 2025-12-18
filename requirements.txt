@@ -1,0 +1,7 @@
+numpy
+opencv-python
+mss
+ImageHash
+Pillow
+PyQt5
+PyQtWebEngine
