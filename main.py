@@ -523,6 +523,29 @@ class ScoreEditorWidget(QWidget):
             page_widget, page_layout = create_page_widget(current_page_num)
             self.preview_layout.addWidget(page_widget)
 
+            # 제목/작곡가 미리보기 추가
+            title = self.title_edit.text().strip()
+            composer = self.composer_edit.text().strip()
+            if title or composer:
+                # 제목/작곡가 영역을 위한 별도 위젯
+                header_widget = QWidget()
+                header_layout = QVBoxLayout(header_widget)
+                header_layout.setContentsMargins(20, 10, 20, 20) # 상하좌우 여백
+                header_layout.setSpacing(5)
+
+                if title:
+                    title_label = QLabel(title)
+                    title_label.setAlignment(Qt.AlignCenter)
+                    title_label.setStyleSheet("font-size: 22px; font-weight: bold; color: black; border: none;")
+                    header_layout.addWidget(title_label)
+                if composer:
+                    composer_label = QLabel(composer)
+                    composer_label.setAlignment(Qt.AlignRight)
+                    composer_label.setStyleSheet("font-size: 13px; color: #333; border: none; padding-top: 5px;")
+                    header_layout.addWidget(composer_label)
+                
+                page_layout.insertWidget(1, header_widget) # "Page N" 라벨 다음에 추가
+
             for path in file_paths:
                 if not os.path.exists(path):
                     continue
