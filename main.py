@@ -426,6 +426,9 @@ class ScoreEditorWidget(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
 
+        # 상단 설정 영역 (가로 배치)
+        top_layout = QHBoxLayout()
+
         # 1. 메타데이터 입력
         info_group = QGroupBox("악보 정보 입력")
         form_layout = QFormLayout()
@@ -442,7 +445,28 @@ class ScoreEditorWidget(QWidget):
         form_layout.addRow("제목:", self.title_edit)
         form_layout.addRow("작곡가:", self.composer_edit)
         info_group.setLayout(form_layout)
-        layout.addWidget(info_group)
+        top_layout.addWidget(info_group)
+        
+        # 1.5 PDF 설정
+        settings_group = QGroupBox("PDF 설정")
+        settings_layout = QFormLayout()
+        
+        self.margin_edit = QLineEdit("60")
+        self.spacing_edit = QLineEdit("40")
+        self.page_num_pos = QComboBox()
+        self.page_num_pos.addItems(["하단 중앙", "하단 우측", "상단 우측", "없음"])
+        
+        settings_layout.addRow("페이지 여백 (px):", self.margin_edit)
+        settings_layout.addRow("이미지 간격 (px):", self.spacing_edit)
+        settings_layout.addRow("페이지 번호:", self.page_num_pos)
+        settings_group.setLayout(settings_layout)
+        top_layout.addWidget(settings_group)
+        
+        layout.addLayout(top_layout)
+        
+        self.margin_edit.textChanged.connect(self.refresh_preview)
+        self.spacing_edit.textChanged.connect(self.refresh_preview)
+        self.page_num_pos.currentIndexChanged.connect(self.refresh_preview)
 
         # 2. 미리보기 영역
         preview_label = QLabel("페이지 미리보기 (왼쪽 목록에서 순서 변경 가능)")
@@ -473,7 +497,10 @@ class ScoreEditorWidget(QWidget):
         self.btn_save.setMinimumHeight(40)
         self.btn_save.clicked.connect(lambda: self.save_requested.emit({
             'title': self.title_edit.text(),
-            'composer': self.composer_edit.text()
+            'composer': self.composer_edit.text(),
+            'margin': self.margin_edit.text(),
+            'spacing': self.spacing_edit.text(),
+            'page_num_pos': self.page_num_pos.currentText()
         }))
         
         btn_layout.addWidget(self.btn_cancel)
@@ -496,56 +523,110 @@ class ScoreEditorWidget(QWidget):
             return
 
         try:
+            # 설정값 파싱
+            try:
+                margin = int(self.margin_edit.text())
+                spacing = int(self.spacing_edit.text())
+            except ValueError:
+                margin = 60
+                spacing = 40
+            page_num_pos_str = self.page_num_pos.currentText()
+
             # 첫 번째 이미지로 기준 너비 설정 (PDF 생성 로직과 동일하게)
             first_img = Image.open(file_paths[0])
             base_width = first_img.width
             # A4 비율 (210x297mm) -> 높이 계산
             page_height = int(base_width * (297 / 210))
             
-            current_y = 0
-            if self.title_edit.text() or self.composer_edit.text():
-                current_y = 150
+            # 화면 표시용 스케일 (미리보기 너비 500px 기준)
+            PREVIEW_WIDTH = 500
+            scale = PREVIEW_WIDTH / base_width
+            
+            display_margin = int(margin * scale)
+            display_spacing = int(spacing * scale)
+            display_content_width = int((base_width - 2*margin) * scale)
+            if display_content_width < 10: display_content_width = 10
+            
+            current_y = margin
+            
+            # 제목/작곡가 높이 계산
+            title = self.title_edit.text().strip()
+            composer = self.composer_edit.text().strip()
+            
+            if title or composer:
+                # PDF 생성 로직과 유사하게 높이 추정
+                t_h = (base_width/30) * 1.5 if title else 0
+                c_h = (base_width/60) * 1.5 if composer else 0
+                header_height = int(t_h + c_h + 40)
+                current_y += header_height
             
             current_page_num = 1
             
             # 페이지 컨테이너 생성 함수
             def create_page_widget(page_num):
                 widget = QWidget()
+                widget.setFixedWidth(PREVIEW_WIDTH)
                 widget.setStyleSheet("background-color: white; border: 1px solid #999; margin-bottom: 20px;")
-                layout = QVBoxLayout(widget)
-                layout.setContentsMargins(10, 10, 10, 10)
-                layout.setSpacing(2)
+                
+                main_layout = QVBoxLayout(widget)
+                main_layout.setContentsMargins(0, 0, 0, 0)
+                main_layout.setSpacing(0)
+                
+                # 상단 식별자
                 lbl = QLabel(f"Page {page_num}")
                 lbl.setAlignment(Qt.AlignCenter)
-                lbl.setStyleSheet("font-weight: bold; color: #333; border-bottom: 1px solid #ccc; padding-bottom: 5px; margin-bottom: 5px;")
-                layout.addWidget(lbl)
-                return widget, layout
+                lbl.setStyleSheet("background-color: #eee; color: #555; font-size: 10px; padding: 2px;")
+                main_layout.addWidget(lbl)
+                
+                # 콘텐츠 영역
+                content_widget = QWidget()
+                content_layout = QVBoxLayout(content_widget)
+                content_layout.setContentsMargins(display_margin, display_margin, display_margin, display_margin)
+                content_layout.setSpacing(display_spacing)
+                content_layout.setAlignment(Qt.AlignTop)
+                main_layout.addWidget(content_widget)
+                
+                # 페이지 번호 미리보기
+                if page_num_pos_str != "없음":
+                    num_lbl = QLabel(str(page_num))
+                    num_lbl.setStyleSheet("font-weight: bold; color: black;")
+                    
+                    if "상단" in page_num_pos_str:
+                        h_layout = QHBoxLayout()
+                        h_layout.setContentsMargins(display_margin, 5, display_margin, 0)
+                        if "우측" in page_num_pos_str: h_layout.addStretch(); h_layout.addWidget(num_lbl)
+                        main_layout.insertLayout(1, h_layout)
+                    elif "하단" in page_num_pos_str:
+                        h_layout = QHBoxLayout()
+                        h_layout.setContentsMargins(display_margin, 0, display_margin, 5)
+                        if "우측" in page_num_pos_str: h_layout.addStretch(); h_layout.addWidget(num_lbl)
+                        elif "중앙" in page_num_pos_str: h_layout.addStretch(); h_layout.addWidget(num_lbl); h_layout.addStretch()
+                        main_layout.addLayout(h_layout)
 
-            page_widget, page_layout = create_page_widget(current_page_num)
+                return widget, content_layout
+
+            page_widget, content_layout = create_page_widget(current_page_num)
             self.preview_layout.addWidget(page_widget)
 
             # 제목/작곡가 미리보기 추가
-            title = self.title_edit.text().strip()
-            composer = self.composer_edit.text().strip()
             if title or composer:
-                # 제목/작곡가 영역을 위한 별도 위젯
                 header_widget = QWidget()
                 header_layout = QVBoxLayout(header_widget)
-                header_layout.setContentsMargins(20, 10, 20, 20) # 상하좌우 여백
-                header_layout.setSpacing(5)
+                header_layout.setContentsMargins(0, 0, 0, int(20*scale))
+                header_layout.setSpacing(int(5*scale))
 
                 if title:
                     title_label = QLabel(title)
                     title_label.setAlignment(Qt.AlignCenter)
-                    title_label.setStyleSheet("font-size: 22px; font-weight: bold; color: black; border: none;")
+                    title_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: black; border: none;")
                     header_layout.addWidget(title_label)
                 if composer:
                     composer_label = QLabel(composer)
                     composer_label.setAlignment(Qt.AlignRight)
-                    composer_label.setStyleSheet("font-size: 13px; color: #333; border: none; padding-top: 5px;")
+                    composer_label.setStyleSheet(f"font-size: 12px; color: #333; border: none;")
                     header_layout.addWidget(composer_label)
                 
-                page_layout.insertWidget(1, header_widget) # "Page N" 라벨 다음에 추가
+                content_layout.addWidget(header_widget)
 
             for path in file_paths:
                 if not os.path.exists(path):
@@ -553,29 +634,33 @@ class ScoreEditorWidget(QWidget):
                 
                 img = Image.open(path)
                 
-                # 너비 맞춤 리사이즈 높이 계산
-                if img.width != base_width:
-                    scaled_h = int(img.height * (base_width / img.width))
+                # PDF 기준 콘텐츠 너비
+                pdf_content_w = base_width - (margin * 2)
+                if pdf_content_w < 1: pdf_content_w = 1
+                
+                # PDF 기준 높이 계산
+                if img.width != pdf_content_w:
+                    new_h = int(img.height * (pdf_content_w / img.width))
                 else:
-                    scaled_h = img.height
+                    new_h = img.height
                 
                 # 페이지 넘김 체크
-                if current_y + scaled_h > page_height:
+                if current_y + new_h + margin > page_height:
                     current_page_num += 1
-                    current_y = 0
-                    page_widget, page_layout = create_page_widget(current_page_num)
+                    current_y = margin
+                    page_widget, content_layout = create_page_widget(current_page_num)
                     self.preview_layout.addWidget(page_widget)
                 
                 # 이미지 추가
                 pix = QPixmap(path)
                 if not pix.isNull():
                     lbl_img = QLabel()
-                    scaled = pix.scaledToWidth(480, Qt.SmoothTransformation)
+                    scaled = pix.scaledToWidth(display_content_width, Qt.SmoothTransformation)
                     lbl_img.setPixmap(scaled)
                     lbl_img.setAlignment(Qt.AlignCenter)
-                    page_layout.addWidget(lbl_img)
+                    content_layout.addWidget(lbl_img)
                 
-                current_y += scaled_h
+                current_y += new_h + spacing
 
         except Exception as e:
             print(f"Preview error: {e}")
@@ -1240,82 +1325,111 @@ class MainWindow(QMainWindow):
             self.status_label.setText("PDF 생성 중...")
             QApplication.processEvents()
             
+            # 설정값 파싱
+            try:
+                margin = int(metadata.get('margin', 60))
+                spacing = int(metadata.get('spacing', 40))
+            except ValueError:
+                margin = 60
+                spacing = 40
+            
+            page_num_pos = metadata.get('page_num_pos', '하단 중앙')
+
             image_objects = [Image.open(f).convert("RGB") for f in files]
             base_width = image_objects[0].width
             page_height = int(base_width * (297 / 210))
+            
+            # 여백을 고려한 콘텐츠 너비
+            content_width = base_width - (margin * 2)
+            if content_width < 100: content_width = base_width
+            
             final_pages = []
             current_page = Image.new('RGB', (base_width, page_height), 'white')
-            y_offset = 0
+            
+            current_y = margin
 
             # 제목/작곡가 추가 (첫 페이지)
             title = metadata.get('title', '').strip()
             composer = metadata.get('composer', '').strip()
             
             if title or composer:
-                header_height = 150
-                y_offset = header_height
-                
                 draw = ImageDraw.Draw(current_page)
                 try:
-                    title_font = ImageFont.truetype("arial.ttf", size=60)
-                    comp_font = ImageFont.truetype("arial.ttf", size=30)
+                    title_font = ImageFont.truetype("arial.ttf", size=int(base_width/30))
+                    comp_font = ImageFont.truetype("arial.ttf", size=int(base_width/60))
                 except:
                     title_font = ImageFont.load_default()
                     comp_font = ImageFont.load_default()
                 
+                header_offset = 0
                 if title:
                     if hasattr(draw, "textbbox"):
                         bbox = draw.textbbox((0, 0), title, font=title_font)
                         tw = bbox[2] - bbox[0]
+                        th = bbox[3] - bbox[1]
                     else:
-                        tw, _ = draw.textsize(title, font=title_font)
-                    draw.text(((base_width - tw) / 2, 50), title, fill="black", font=title_font)
+                        tw, th = draw.textsize(title, font=title_font)
+                    draw.text(((base_width - tw) / 2, current_y), title, fill="black", font=title_font)
+                    header_offset += th + 20
                 
                 if composer:
                     if hasattr(draw, "textbbox"):
                         bbox = draw.textbbox((0, 0), composer, font=comp_font)
                         cw = bbox[2] - bbox[0]
+                        ch = bbox[3] - bbox[1]
                     else:
-                        cw, _ = draw.textsize(composer, font=comp_font)
-                    draw.text((base_width - cw - 50, 110), composer, fill="black", font=comp_font)
+                        cw, ch = draw.textsize(composer, font=comp_font)
+                    draw.text((base_width - margin - cw, current_y + header_offset), composer, fill="black", font=comp_font)
+                    header_offset += ch + 20
+                
+                current_y += header_offset + 20
 
             for img in image_objects:
-                if img.width != base_width:
-                    new_h = int(img.height * (base_width / img.width))
-                    img = img.resize((base_width, new_h), Image.Resampling.LANCZOS)
+                if img.width != content_width:
+                    new_h = int(img.height * (content_width / img.width))
+                    img = img.resize((content_width, new_h), Image.Resampling.LANCZOS)
+                else:
+                    new_h = img.height
                     
-                if y_offset + img.height > page_height:
+                if current_y + new_h + margin > page_height:
                     final_pages.append(current_page)
                     current_page = Image.new('RGB', (base_width, page_height), 'white')
-                    y_offset = 0
+                    current_y = margin
                     
-                current_page.paste(img, (0, y_offset))
-                y_offset += img.height
+                current_page.paste(img, (margin, current_y))
+                current_y += new_h + spacing
                 
             final_pages.append(current_page)
 
-            try:
-                draw_font = ImageFont.truetype("arial.ttf", size=max(14, int(base_width/40)))
-            except IOError:
-                draw_font = ImageFont.load_default()
+            if page_num_pos != "없음":
+                try:
+                    draw_font = ImageFont.truetype("arial.ttf", size=max(14, int(base_width/50)))
+                except IOError:
+                    draw_font = ImageFont.load_default()
 
-            for i, page in enumerate(final_pages, 1):
-                draw = ImageDraw.Draw(page)
-                text = f"{i} / {len(final_pages)}"
-                
-                if hasattr(draw, "textbbox"):
-                    bbox = draw.textbbox((0, 0), text, font=draw_font)
-                    text_w = bbox[2] - bbox[0]
-                    text_h = bbox[3] - bbox[1]
-                else:
-                    text_w, text_h = draw.textsize(text, font=draw_font)
+                for i, page in enumerate(final_pages, 1):
+                    draw = ImageDraw.Draw(page)
+                    text = f"{i} / {len(final_pages)}"
                     
-                draw.text(
-                    ((base_width - text_w) // 2, page_height - text_h - 20), 
-                    text, 
-                    fill="black", 
-                    font=draw_font
-                )
+                    if hasattr(draw, "textbbox"):
+                        bbox = draw.textbbox((0, 0), text, font=draw_font)
+                        text_w = bbox[2] - bbox[0]
+                        text_h = bbox[3] - bbox[1]
+                    else:
+                        text_w, text_h = draw.textsize(text, font=draw_font)
+                    
+                    x_pos, y_pos = 0, 0
+                    if page_num_pos == "하단 중앙":
+                        x_pos = (base_width - text_w) // 2
+                        y_pos = page_height - margin // 2 - text_h
+                    elif page_num_pos == "하단 우측":
+                        x_pos = base_width - margin - text_w
+                        y_pos = page_height - margin // 2 - text_h
+                    elif page_num_pos == "상단 우측":
+                        x_pos = base_width - margin - text_w
+                        y_pos = margin // 2
+                        
+                    draw.text((x_pos, y_pos), text, fill="black", font=draw_font)
 
             final_pages[0].save(path, save_all=True, append_images=final_pages[1:])
             
