@@ -942,18 +942,43 @@ class MainWindow(QMainWindow):
         self.btn_capture.setStyleSheet("")  # 스타일 재적용
         self.apply_stylesheet()
         
-        # 스크롤 모드 잔여 버퍼 저장
-        if self.mode_combo.currentIndex() == 1 and self.scroll_buffer is not None and self.scroll_buffer.shape[1] > 50:
-            self.capture_counter += 1
-            filename = os.path.join(OUTPUT_FOLDER, f"score_scroll_{self.capture_counter:03d}.png")
-            cv2.imwrite(filename, self.scroll_buffer)
-            self.captured_files.append(filename)
+        # 스크롤 모드: 캡처 종료 시 일괄 자르기 수행
+        if self.mode_combo.currentIndex() == 1 and self.scroll_buffer is not None:
+            self.status_label.setText("이미지 분석 및 자르는 중...")
+            QApplication.processEvents()
             
-            item = QListWidgetItem(os.path.basename(filename))
-            item.setData(Qt.UserRole, filename)
-            self.list_widget.addItem(item)
-            self.list_widget.scrollToBottom()
-            self.display_image(filename)
+            full_img = self.scroll_buffer
+            total_width = full_img.shape[1]
+            target_w = self.capture_area_dict['width']
+            
+            current_x = 0
+            
+            while current_x < total_width:
+                # 남은 길이가 목표 너비의 1.2배 이하면 마지막 조각으로 저장
+                if total_width - current_x <= target_w * 1.2:
+                    page_img = full_img[:, current_x:]
+                    if page_img.shape[1] > 50: # 너무 작은 조각 제외
+                        self._save_image_to_list(page_img)
+                    break
+                
+                # 자를 위치 탐색 (목표 너비의 80% ~ 120% 사이)
+                search_min = int(target_w * 0.8)
+                search_max = int(target_w * 1.2)
+                
+                # 전체 이미지 범위 내에서 탐색
+                cut_x = self.find_best_cut_point(full_img, current_x + search_min, current_x + search_max)
+                
+                if cut_x:
+                    page_img = full_img[:, current_x:cut_x]
+                    self._save_image_to_list(page_img)
+                    current_x = cut_x
+                else:
+                    # 적절한 자를 위치를 못 찾으면 강제로 target_w 만큼 자름
+                    cut_x = current_x + target_w
+                    page_img = full_img[:, current_x:cut_x]
+                    self._save_image_to_list(page_img)
+                    current_x = cut_x
+
             self.scroll_buffer = None
 
         self.btn_select.setEnabled(True)
@@ -961,6 +986,19 @@ class MainWindow(QMainWindow):
         
         count = len(self.captured_files)
         self.status_label.setText(f"캡처 중지 (총 {count}개)")
+
+    def _save_image_to_list(self, img):
+        """이미지를 저장하고 리스트에 추가하는 내부 함수"""
+        self.capture_counter += 1
+        filename = os.path.join(OUTPUT_FOLDER, f"score_scroll_{self.capture_counter:03d}.png")
+        cv2.imwrite(filename, img)
+        self.captured_files.append(filename)
+        
+        item = QListWidgetItem(os.path.basename(filename))
+        item.setData(Qt.UserRole, filename)
+        self.list_widget.addItem(item)
+        self.list_widget.scrollToBottom()
+        self.display_image(filename)
 
     def find_best_cut_point(self, img, min_x, max_x):
         """이미지에서 최적의 자르기 위치(세로선)를 찾습니다."""
@@ -1109,32 +1147,7 @@ class MainWindow(QMainWindow):
                                 new_part = img_bgr[:, new_part_start:]
                                 if new_part.shape[1] > 0:
                                     self.scroll_buffer = np.hstack((self.scroll_buffer, new_part))
-                                    
-                                    # --- 자동 자르기 로직 ---
-                                    target_w = self.capture_area_dict['width']
-                                    # 버퍼가 기준 너비의 1.2배를 넘으면 자르기 시도
-                                    if self.scroll_buffer.shape[1] > target_w * 1.2:
-                                        min_search = int(target_w * 0.8)
-                                        max_search = int(target_w * 1.2)
-                                        
-                                        cut_x = self.find_best_cut_point(self.scroll_buffer, min_search, max_search)
-                                        if cut_x:
-                                            page_img = self.scroll_buffer[:, :cut_x]
-                                            self.scroll_buffer = self.scroll_buffer[:, cut_x:]
-                                            
-                                            self.capture_counter += 1
-                                            filename = os.path.join(OUTPUT_FOLDER, f"score_scroll_{self.capture_counter:03d}.png")
-                                            cv2.imwrite(filename, page_img)
-                                            self.captured_files.append(filename)
-                                            
-                                            item = QListWidgetItem(os.path.basename(filename))
-                                            item.setData(Qt.UserRole, filename)
-                                            self.list_widget.addItem(item)
-                                            self.list_widget.scrollToBottom()
-                                            self.display_image(filename)
-                                            self.btn_pdf.setEnabled(True)
-
-                                    self.status_label.setText(f"이어붙이기 중... (버퍼: {self.scroll_buffer.shape[1]}px)")
+                                    self.status_label.setText(f"이어붙이기 중... (전체 폭: {self.scroll_buffer.shape[1]}px)")
                     
         except Exception as e:
             print(f"Capture Error: {e}")
