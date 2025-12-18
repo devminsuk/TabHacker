@@ -942,11 +942,88 @@ class MainWindow(QMainWindow):
         self.btn_capture.setStyleSheet("")  # 스타일 재적용
         self.apply_stylesheet()
         
+        # 스크롤 모드 잔여 버퍼 저장
+        if self.mode_combo.currentIndex() == 1 and self.scroll_buffer is not None and self.scroll_buffer.shape[1] > 50:
+            self.capture_counter += 1
+            filename = os.path.join(OUTPUT_FOLDER, f"score_scroll_{self.capture_counter:03d}.png")
+            cv2.imwrite(filename, self.scroll_buffer)
+            self.captured_files.append(filename)
+            
+            item = QListWidgetItem(os.path.basename(filename))
+            item.setData(Qt.UserRole, filename)
+            self.list_widget.addItem(item)
+            self.list_widget.scrollToBottom()
+            self.display_image(filename)
+            self.scroll_buffer = None
+
         self.btn_select.setEnabled(True)
         self.btn_pdf.setEnabled(len(self.captured_files) > 0)
         
         count = len(self.captured_files)
         self.status_label.setText(f"캡처 중지 (총 {count}개)")
+
+    def find_best_cut_point(self, img, min_x, max_x):
+        """이미지에서 최적의 자르기 위치(세로선)를 찾습니다."""
+        h, w = img.shape[:2]
+        if min_x >= max_x or max_x > w:
+            return None
+            
+        roi = img[:, min_x:max_x]
+        
+        # 1. 전처리: 그레이스케일 -> 이진화
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        # 악보는 흰 배경에 검은 선이므로, 반전시켜서 선을 찾음 (THRESH_BINARY_INV)
+        # 임계값 200은 일반적인 악보에서 적절함
+        _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+        
+        # 2. 세로선 추출 (Morphological Open)
+        # 높이의 30% 이상 되는 세로선만 남김 (음표 기둥 등 제거 목적)
+        line_height = max(int(h * 0.3), 10) 
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, line_height))
+        vertical_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+        
+        # 3. 수직 투영 (Vertical Projection)
+        col_sums = np.sum(vertical_lines, axis=0) / 255  # 픽셀 수로 변환
+        
+        # 4. 피크 검출 (마디 줄 후보)
+        candidates = []
+        # 최소 10픽셀 이상 높이의 선이 감지되어야 함
+        min_line_pixels = line_height * 0.5 
+        
+        for x in range(1, len(col_sums) - 1):
+            val = col_sums[x]
+            if val > min_line_pixels:
+                # 로컬 피크 확인 (주변보다 값이 크거나 같음)
+                if val >= col_sums[x-1] and val >= col_sums[x+1]:
+                    # 중복 피크 방지 (인접한 픽셀이 계속 피크일 경우 하나만)
+                    if not candidates or (min_x + x) - candidates[-1][0] > 5:
+                        candidates.append((min_x + x, val))
+        
+        if candidates:
+            # 가장 확실한 선(가장 긴 선)을 선택하거나, 
+            # 여러 개라면 검색 범위의 끝부분(오른쪽)에 가까운 것을 선호할 수 있음.
+            # 여기서는 '가장 긴 선'을 최우선으로 하되, 비슷하면 오른쪽 선호
+            
+            # 정렬: 1순위 길이(내림차순), 2순위 x좌표(내림차순)
+            candidates.sort(key=lambda item: (item[1], item[0]), reverse=True)
+            
+            best_x = candidates[0][0]
+            return best_x + 10 # 마디 줄 포함하고 약간의 여백
+            
+        # 5. 마디 줄이 감지되지 않은 경우: 공백(흰색 영역) 찾기
+        # 원본 gray 이미지에서 가장 어두운 성분이 적은 곳
+        inverted_gray = 255 - gray
+        col_sums_gray = np.sum(inverted_gray, axis=0)
+        
+        # 검색 범위 내에서 가장 흰 부분 찾기 (스무딩 적용)
+        kernel_size = 5
+        smoothed = np.convolve(col_sums_gray, np.ones(kernel_size)/kernel_size, mode='valid')
+        
+        if len(smoothed) > 0:
+            min_val_idx = np.argmin(smoothed)
+            return min_x + min_val_idx + (kernel_size // 2)
+            
+        return min_x + np.argmin(col_sums_gray)
 
     def perform_capture(self):
         if not self.capture_area_dict:
@@ -1011,18 +1088,8 @@ class MainWindow(QMainWindow):
                 # --- 가로 스크롤 모드 (이어붙이기) ---
                 if self.scroll_buffer is None:
                     self.scroll_buffer = img_bgr
-                    self.capture_counter += 1
-                    filename = os.path.join(OUTPUT_FOLDER, f"score_scroll_{self.capture_counter:03d}.png")
-                    self.current_scroll_filename = filename
-                    cv2.imwrite(filename, img_bgr)
-                    self.captured_files.append(filename)
-                    
-                    item = QListWidgetItem(os.path.basename(filename))
-                    item.setData(Qt.UserRole, filename)
-                    self.list_widget.addItem(item)
-                    self.display_image(filename)
-                    self.btn_pdf.setEnabled(True)
-                    self.status_label.setText("스크롤 캡처 시작")
+                    # 첫 프레임은 버퍼링만 함
+                    self.status_label.setText("스크롤 캡처 시작 (버퍼링...)")
                 else:
                     # 템플릿 매칭으로 겹치는 부분 찾기
                     template_width = 200
@@ -1042,9 +1109,32 @@ class MainWindow(QMainWindow):
                                 new_part = img_bgr[:, new_part_start:]
                                 if new_part.shape[1] > 0:
                                     self.scroll_buffer = np.hstack((self.scroll_buffer, new_part))
-                                    cv2.imwrite(self.current_scroll_filename, self.scroll_buffer)
-                                    self.display_image(self.current_scroll_filename)
-                                    self.status_label.setText(f"이어붙이기 중... (폭: {self.scroll_buffer.shape[1]}px)")
+                                    
+                                    # --- 자동 자르기 로직 ---
+                                    target_w = self.capture_area_dict['width']
+                                    # 버퍼가 기준 너비의 1.2배를 넘으면 자르기 시도
+                                    if self.scroll_buffer.shape[1] > target_w * 1.2:
+                                        min_search = int(target_w * 0.8)
+                                        max_search = int(target_w * 1.2)
+                                        
+                                        cut_x = self.find_best_cut_point(self.scroll_buffer, min_search, max_search)
+                                        if cut_x:
+                                            page_img = self.scroll_buffer[:, :cut_x]
+                                            self.scroll_buffer = self.scroll_buffer[:, cut_x:]
+                                            
+                                            self.capture_counter += 1
+                                            filename = os.path.join(OUTPUT_FOLDER, f"score_scroll_{self.capture_counter:03d}.png")
+                                            cv2.imwrite(filename, page_img)
+                                            self.captured_files.append(filename)
+                                            
+                                            item = QListWidgetItem(os.path.basename(filename))
+                                            item.setData(Qt.UserRole, filename)
+                                            self.list_widget.addItem(item)
+                                            self.list_widget.scrollToBottom()
+                                            self.display_image(filename)
+                                            self.btn_pdf.setEnabled(True)
+
+                                    self.status_label.setText(f"이어붙이기 중... (버퍼: {self.scroll_buffer.shape[1]}px)")
                     
         except Exception as e:
             print(f"Capture Error: {e}")
