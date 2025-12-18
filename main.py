@@ -137,13 +137,19 @@ class SelectionOverlay(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("YouTube 악보 캡처 Pro (자동 재생 지원)")
+        self.setWindowTitle("YouTube 악보 캡처 Pro")
         self.resize(1300, 850)
         self.capture_area_dict = None
         self.captured_files = []
 
         self.capture_timer = QTimer(self)
         self.capture_timer.timeout.connect(self.perform_capture)
+        
+        # --- 광고 제거용 타이머 (1초 간격) ---
+        self.ad_block_timer = QTimer(self)
+        self.ad_block_timer.timeout.connect(self.remove_youtube_ads)
+        self.ad_block_timer.start(1000)
+
         self.last_captured_gray = None
         self.last_hash = None
         self.countdown_value = -1
@@ -224,6 +230,39 @@ class MainWindow(QMainWindow):
         self.overlay.selection_finished.connect(self.finish_selection)
         
         splitter = QSplitter(Qt.Horizontal); splitter.addWidget(left_panel); splitter.addWidget(right_container); splitter.setStretchFactor(1, 3); main_layout.addWidget(splitter)
+
+    # --- 광고 제거 로직 ---
+    def remove_youtube_ads(self):
+        """유튜브 광고 요소 및 배너 제거 스크립트 주입"""
+        ad_script = """
+        (function() {
+            // 1. 광고 레이어 및 배너 선택자
+            const selectors = [
+                '.video-ads', '.ytp-ad-module', '.ytp-ad-overlay-container',
+                '#masthead-ad', '#player-ads', 'ytd-promoted-sparkles-renderer',
+                'ytd-display-ad-render', '.ad-container', '.ad-div'
+            ];
+            selectors.forEach(s => {
+                document.querySelectorAll(s).forEach(el => el.remove());
+            });
+
+            // 2. 광고 건너뛰기 버튼 자동 클릭
+            const skipButtons = ['.ytp-ad-skip-button', '.ytp-ad-skip-button-modern', '.ytp-skip-ad-button'];
+            skipButtons.forEach(s => {
+                const btn = document.querySelector(s);
+                if(btn) btn.click();
+            });
+
+            // 3. 광고 영상이 재생 중이면 강제 종료(시간 이동)
+            const video = document.querySelector('video');
+            if (video && document.querySelector('.ad-showing')) {
+                if (!isNaN(video.duration)) {
+                    video.currentTime = video.duration - 0.1;
+                }
+            }
+        })();
+        """
+        self.webview.page().runJavaScript(ad_script)
 
     # --- 유튜브 제어 ---
     def set_youtube_state(self, action, value=None):
@@ -329,7 +368,9 @@ class MainWindow(QMainWindow):
                 should_save = True
             else:
                 score, _ = compare_ssim(self.last_captured_gray, img_gray, full=True)
-                if score < threshold: should_save = True
+                if score < threshold:
+                    self.status_label.setText(f"페이지 넘김 감지 (유사도: {score:.2f})")
+                    should_save = True
 
             if should_save:
                 pil_img = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
@@ -341,10 +382,8 @@ class MainWindow(QMainWindow):
                     self.list_widget.addItem(os.path.basename(filename))
                     self.list_widget.scrollToBottom()
                     
-                    # --- 미리보기 갱신 ---
                     self.display_image(filename)
                     self.btn_pdf.setEnabled(True)
-                    # -------------------
 
                     self.last_captured_gray = img_gray
                     self.last_hash = curr_hash
@@ -372,7 +411,6 @@ class MainWindow(QMainWindow):
                 self.image_preview_label.clear()
                 self.btn_pdf.setEnabled(False)
             else:
-                # 삭제 후 마지막 항목 미리보기
                 last_item = self.list_widget.item(self.list_widget.count() - 1)
                 self.show_image_preview(last_item)
 
@@ -383,7 +421,6 @@ class MainWindow(QMainWindow):
         
         try:
             image_objects = [Image.open(f).convert("RGB") for f in self.captured_files if os.path.exists(f)]
-            # A4 비율 자동 맞춤 생성
             base_width = image_objects[0].width
             page_height = int(base_width * (297 / 210))
             final_pages = []
@@ -402,7 +439,6 @@ class MainWindow(QMainWindow):
                 y_offset += img.height
             final_pages.append(current_page)
 
-            # 페이지 번호 삽입
             try:
                 draw_font = ImageFont.truetype("arial.ttf", size=max(14, int(base_width/40)))
             except IOError:
@@ -411,15 +447,11 @@ class MainWindow(QMainWindow):
             for i, page in enumerate(final_pages, 1):
                 draw = ImageDraw.Draw(page)
                 text = f"{i} / {len(final_pages)}"
-                
-                # 텍스트 크기 계산 (Pillow 버전에 따라 다름)
                 if hasattr(draw, "textbbox"):
                     bbox = draw.textbbox((0, 0), text, font=draw_font)
-                    text_w = bbox[2] - bbox[0]
-                    text_h = bbox[3] - bbox[1]
+                    text_w = bbox[2] - bbox[0]; text_h = bbox[3] - bbox[1]
                 else:
                     text_w, text_h = draw.textsize(text, font=draw_font)
-
                 draw.text(((base_width - text_w) // 2, page_height - text_h - 20), text, fill="black", font=draw_font)
 
             final_pages[0].save(path, save_all=True, append_images=final_pages[1:])
