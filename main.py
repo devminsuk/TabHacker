@@ -9,7 +9,8 @@ from PIL import Image, ImageDraw, ImageFont
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QLineEdit, 
                              QGroupBox, QListWidget, QMessageBox, QFileDialog,
-                             QSplitter, QFrame)
+                             QSplitter, QFrame, QStackedWidget, QScrollArea, 
+                             QFormLayout, QAbstractItemView, QListWidgetItem)
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtCore import Qt, pyqtSignal, QUrl, QRect, QRectF, QSize, QPoint, QTimer
 from PyQt5.QtGui import QPainter, QColor, QPen, QImage, QPixmap, QPainterPath, QRegion, QFont
@@ -412,6 +413,99 @@ class SelectionOverlay(QWidget):
             painter.setFont(font)
             painter.drawText(self.rect(), Qt.AlignCenter, "드래그하여 악보 영역을 선택하세요")
 
+class ScoreEditorWidget(QWidget):
+    """PDF 생성 전 메타데이터 입력 및 미리보기 위젯"""
+    save_requested = pyqtSignal(dict)
+    cancel_requested = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # 1. 메타데이터 입력
+        info_group = QGroupBox("악보 정보 입력")
+        form_layout = QFormLayout()
+        form_layout.setLabelAlignment(Qt.AlignRight)
+        
+        self.title_edit = QLineEdit()
+        self.title_edit.setPlaceholderText("노래 제목을 입력하세요")
+        self.composer_edit = QLineEdit()
+        self.composer_edit.setPlaceholderText("작곡가/아티스트를 입력하세요")
+        
+        form_layout.addRow("제목:", self.title_edit)
+        form_layout.addRow("작곡가:", self.composer_edit)
+        info_group.setLayout(form_layout)
+        layout.addWidget(info_group)
+
+        # 2. 미리보기 영역
+        preview_label = QLabel("페이지 미리보기 (왼쪽 목록에서 순서 변경 가능)")
+        preview_label.setStyleSheet("font-weight: bold; color: #555;")
+        layout.addWidget(preview_label)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setStyleSheet("background-color: #e0e0e0; border: 1px solid #ccc;")
+        
+        self.preview_content = QWidget()
+        self.preview_content.setStyleSheet("background-color: #e0e0e0;")
+        self.preview_layout = QVBoxLayout(self.preview_content)
+        self.preview_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+        self.preview_layout.setSpacing(20)
+        
+        self.scroll.setWidget(self.preview_content)
+        layout.addWidget(self.scroll)
+
+        # 3. 하단 버튼
+        btn_layout = QHBoxLayout()
+        self.btn_cancel = QPushButton("뒤로 가기")
+        self.btn_cancel.setMinimumHeight(40)
+        self.btn_cancel.clicked.connect(self.cancel_requested.emit)
+        
+        self.btn_save = QPushButton("PDF 저장하기")
+        self.btn_save.setObjectName("captureButton") # 초록색 스타일 재사용
+        self.btn_save.setMinimumHeight(40)
+        self.btn_save.clicked.connect(lambda: self.save_requested.emit({
+            'title': self.title_edit.text(),
+            'composer': self.composer_edit.text()
+        }))
+        
+        btn_layout.addWidget(self.btn_cancel)
+        btn_layout.addWidget(self.btn_save)
+        layout.addLayout(btn_layout)
+
+    def load_preview(self, file_paths):
+        # 기존 위젯 제거
+        while self.preview_layout.count():
+            item = self.preview_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        # 이미지 로드
+        for i, path in enumerate(file_paths):
+            if os.path.exists(path):
+                # 컨테이너 (페이지 번호 + 이미지)
+                container = QWidget()
+                container.setStyleSheet("background-color: transparent;")
+                vbox = QVBoxLayout(container)
+                vbox.setContentsMargins(0,0,0,0)
+                
+                lbl_num = QLabel(f"Page {i+1}")
+                lbl_num.setAlignment(Qt.AlignCenter)
+                lbl_num.setStyleSheet("font-weight: bold; color: #333; margin-bottom: 5px;")
+                
+                lbl_img = QLabel()
+                pix = QPixmap(path)
+                if not pix.isNull():
+                    scaled = pix.scaledToWidth(500, Qt.SmoothTransformation)
+                    lbl_img.setPixmap(scaled)
+                    lbl_img.setStyleSheet("border: 1px solid #999; background-color: white;")
+                    lbl_img.setAlignment(Qt.AlignCenter)
+                
+                vbox.addWidget(lbl_num)
+                vbox.addWidget(lbl_img)
+                self.preview_layout.addWidget(container)
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -420,6 +514,7 @@ class MainWindow(QMainWindow):
         self.resize(1300, 750)
         self.capture_area_dict = None
         self.captured_files = []
+        self.capture_counter = 0
         self.is_capturing = False  # 캡처 상태 추적
 
         self.capture_timer = QTimer(self)
@@ -551,6 +646,8 @@ class MainWindow(QMainWindow):
         self.list_widget = QListWidget()
         self.list_widget.setMinimumHeight(100)
         self.list_widget.setMaximumHeight(120)
+        self.list_widget.setDragDropMode(QAbstractItemView.InternalMove)
+        self.list_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.list_widget.itemClicked.connect(self.show_image_preview)
         capture_layout.addWidget(self.list_widget)
         
@@ -564,11 +661,11 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(capture_group)
 
         # 4. PDF 생성
-        self.btn_pdf = QPushButton("3. PDF 생성")
+        self.btn_pdf = QPushButton("3. 편집 및 저장")
         self.btn_pdf.setObjectName("pdfButton")
         self.btn_pdf.setMinimumHeight(42)
         self.btn_pdf.setEnabled(False)
-        self.btn_pdf.clicked.connect(self.create_pdf)
+        self.btn_pdf.clicked.connect(self.switch_to_editor)
         left_layout.addWidget(self.btn_pdf)
 
         # 5. 상태
@@ -580,20 +677,31 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.status_label)
 
         # --- 오른쪽 패널 (웹뷰) ---
-        right_container = QWidget()
-        right_layout = QVBoxLayout(right_container)
-        right_layout.setContentsMargins(0, 0, 0, 0)
+        self.right_stack = QStackedWidget()
+        
+        # 페이지 0: 웹뷰
+        webview_container = QWidget()
+        webview_layout = QVBoxLayout(webview_container)
+        webview_layout.setContentsMargins(0, 0, 0, 0)
         
         self.webview = QWebEngineView()
         self.webview.setUrl(QUrl("https://www.youtube.com"))
-        right_layout.addWidget(self.webview)
+        webview_layout.addWidget(self.webview)
+        
+        # 페이지 1: 에디터
+        self.editor_widget = ScoreEditorWidget()
+        self.editor_widget.save_requested.connect(self.generate_pdf_final)
+        self.editor_widget.cancel_requested.connect(self.switch_to_capture)
+        
+        self.right_stack.addWidget(webview_container)
+        self.right_stack.addWidget(self.editor_widget)
 
         self.overlay = SelectionOverlay(self.webview)
         self.overlay.selection_finished.connect(self.finish_selection)
         
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(left_panel)
-        splitter.addWidget(right_container)
+        splitter.addWidget(self.right_stack)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([300, 1000])
@@ -671,6 +779,26 @@ class MainWindow(QMainWindow):
         msg.setIcon(QMessageBox.Information)
         msg.setStyleSheet(MODERN_STYLESHEET)
         msg.exec_()
+
+    def switch_to_editor(self):
+        """에디터 모드로 전환"""
+        files = self.get_ordered_files()
+        if not files:
+            return
+        
+        self.set_youtube_state("pause")
+        self.editor_widget.load_preview(files)
+        self.right_stack.setCurrentIndex(1)
+        self.status_label.setText("PDF 편집 모드")
+        self.btn_select.setEnabled(False)
+        self.btn_capture.setEnabled(False)
+
+    def switch_to_capture(self):
+        """캡처 모드로 복귀"""
+        self.right_stack.setCurrentIndex(0)
+        self.status_label.setText("캡처 모드")
+        self.btn_select.setEnabled(True)
+        self.btn_capture.setEnabled(True)
 
     def toggle_capture(self):
         """캡처 시작/중지 토글"""
@@ -771,12 +899,14 @@ class MainWindow(QMainWindow):
                 curr_hash = imagehash.phash(pil_img)
                 
                 if self.last_hash is None or (curr_hash - self.last_hash > 5):
-                    filename = os.path.join(OUTPUT_FOLDER, f"score_{len(self.captured_files)+1:03d}.png")
+                    self.capture_counter += 1
+                    filename = os.path.join(OUTPUT_FOLDER, f"score_{self.capture_counter:03d}.png")
                     cv2.imwrite(filename, img_bgr)
                     self.captured_files.append(filename)
                     
-                    item_text = f"{os.path.basename(filename)}"
-                    self.list_widget.addItem(item_text)
+                    item = QListWidgetItem(os.path.basename(filename))
+                    item.setData(Qt.UserRole, filename)
+                    self.list_widget.addItem(item)
                     self.list_widget.scrollToBottom()
                     
                     self.display_image(filename)
@@ -793,7 +923,10 @@ class MainWindow(QMainWindow):
             self.status_label.setText(f"캡처 오류")
 
     def show_image_preview(self, item):
-        path = os.path.join(OUTPUT_FOLDER, item.text())
+        # UserRole에서 경로 가져오기
+        path = item.data(Qt.UserRole)
+        if not path:
+            path = os.path.join(OUTPUT_FOLDER, item.text())
         self.display_image(path)
 
     def display_image(self, filepath):
@@ -806,30 +939,55 @@ class MainWindow(QMainWindow):
             )
             self.image_preview_label.setPixmap(scaled_pixmap)
 
+    def get_ordered_files(self):
+        """리스트 위젯의 순서대로 파일 경로 반환"""
+        files = []
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            path = item.data(Qt.UserRole)
+            if path and os.path.exists(path):
+                files.append(path)
+        return files
+
     def delete_selected_item(self):
-        row = self.list_widget.currentRow()
-        if row >= 0:
-            item = self.list_widget.takeItem(row)
-            full_path = os.path.join(OUTPUT_FOLDER, item.text())
+        items = self.list_widget.selectedItems()
+        if not items:
+            return
+            
+        for item in items:
+            row = self.list_widget.row(item)
+            self.list_widget.takeItem(row)
+            full_path = item.data(Qt.UserRole)
             
             if full_path in self.captured_files:
                 self.captured_files.remove(full_path)
             if os.path.exists(full_path):
-                os.remove(full_path)
+                try:
+                    os.remove(full_path)
+                except: pass
             
-            if self.list_widget.count() == 0:
-                self.image_preview_label.clear()
-                self.image_preview_label.setText("선택된 이미지 없음")
-                self.btn_pdf.setEnabled(False)
-            else:
-                last_item = self.list_widget.item(self.list_widget.count() - 1)
-                self.list_widget.setCurrentRow(self.list_widget.count() - 1)
-                self.show_image_preview(last_item)
-            
-            self.status_label.setText(f"삭제 완료 (남은 이미지: {len(self.captured_files)}개)")
+        if self.list_widget.count() == 0:
+            self.image_preview_label.clear()
+            self.image_preview_label.setText("선택된 이미지 없음")
+            self.btn_pdf.setEnabled(False)
+        else:
+            last_row = self.list_widget.count() - 1
+            self.list_widget.setCurrentRow(last_row)
+            self.show_image_preview(self.list_widget.item(last_row))
+        
+        self.status_label.setText(f"삭제 완료 (남은 이미지: {self.list_widget.count()}개)")
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Delete and self.list_widget.hasFocus():
+            self.delete_selected_item()
+        super().keyPressEvent(event)
 
     def create_pdf(self):
-        if not self.captured_files:
+        self.switch_to_editor()
+
+    def generate_pdf_final(self, metadata):
+        files = self.get_ordered_files()
+        if not files:
             return
             
         path, _ = QFileDialog.getSaveFileName(
@@ -846,12 +1004,44 @@ class MainWindow(QMainWindow):
             self.status_label.setText("PDF 생성 중...")
             QApplication.processEvents()
             
-            image_objects = [Image.open(f).convert("RGB") for f in self.captured_files if os.path.exists(f)]
+            image_objects = [Image.open(f).convert("RGB") for f in files]
             base_width = image_objects[0].width
             page_height = int(base_width * (297 / 210))
             final_pages = []
             current_page = Image.new('RGB', (base_width, page_height), 'white')
             y_offset = 0
+
+            # 제목/작곡가 추가 (첫 페이지)
+            title = metadata.get('title', '').strip()
+            composer = metadata.get('composer', '').strip()
+            
+            if title or composer:
+                header_height = 150
+                y_offset = header_height
+                
+                draw = ImageDraw.Draw(current_page)
+                try:
+                    title_font = ImageFont.truetype("arial.ttf", size=60)
+                    comp_font = ImageFont.truetype("arial.ttf", size=30)
+                except:
+                    title_font = ImageFont.load_default()
+                    comp_font = ImageFont.load_default()
+                
+                if title:
+                    if hasattr(draw, "textbbox"):
+                        bbox = draw.textbbox((0, 0), title, font=title_font)
+                        tw = bbox[2] - bbox[0]
+                    else:
+                        tw, _ = draw.textsize(title, font=title_font)
+                    draw.text(((base_width - tw) / 2, 50), title, fill="black", font=title_font)
+                
+                if composer:
+                    if hasattr(draw, "textbbox"):
+                        bbox = draw.textbbox((0, 0), composer, font=comp_font)
+                        cw = bbox[2] - bbox[0]
+                    else:
+                        cw, _ = draw.textsize(composer, font=comp_font)
+                    draw.text((base_width - cw - 50, 110), composer, fill="black", font=comp_font)
 
             for img in image_objects:
                 if img.width != base_width:
@@ -901,6 +1091,7 @@ class MainWindow(QMainWindow):
             msg.setIcon(QMessageBox.Information)
             msg.setStyleSheet(MODERN_STYLESHEET)
             msg.exec_()
+            self.switch_to_capture()
             
         except Exception as e:
             self.status_label.setText(f"PDF 생성 실패")
