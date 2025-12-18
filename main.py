@@ -420,6 +420,7 @@ class ScoreEditorWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.current_files = []
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
@@ -433,6 +434,9 @@ class ScoreEditorWidget(QWidget):
         self.title_edit.setPlaceholderText("노래 제목을 입력하세요")
         self.composer_edit = QLineEdit()
         self.composer_edit.setPlaceholderText("작곡가/아티스트를 입력하세요")
+        
+        self.title_edit.textChanged.connect(self.refresh_preview)
+        self.composer_edit.textChanged.connect(self.refresh_preview)
         
         form_layout.addRow("제목:", self.title_edit)
         form_layout.addRow("작곡가:", self.composer_edit)
@@ -475,37 +479,82 @@ class ScoreEditorWidget(QWidget):
         btn_layout.addWidget(self.btn_save)
         layout.addLayout(btn_layout)
 
+    def refresh_preview(self):
+        if self.current_files:
+            self.load_preview(self.current_files)
+
     def load_preview(self, file_paths):
+        self.current_files = file_paths
         # 기존 위젯 제거
         while self.preview_layout.count():
             item = self.preview_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         
-        # 이미지 로드
-        for i, path in enumerate(file_paths):
-            if os.path.exists(path):
-                # 컨테이너 (페이지 번호 + 이미지)
-                container = QWidget()
-                container.setStyleSheet("background-color: transparent;")
-                vbox = QVBoxLayout(container)
-                vbox.setContentsMargins(0,0,0,0)
+        if not file_paths:
+            return
+
+        try:
+            # 첫 번째 이미지로 기준 너비 설정 (PDF 생성 로직과 동일하게)
+            first_img = Image.open(file_paths[0])
+            base_width = first_img.width
+            # A4 비율 (210x297mm) -> 높이 계산
+            page_height = int(base_width * (297 / 210))
+            
+            current_y = 0
+            if self.title_edit.text() or self.composer_edit.text():
+                current_y = 150
+            
+            current_page_num = 1
+            
+            # 페이지 컨테이너 생성 함수
+            def create_page_widget(page_num):
+                widget = QWidget()
+                widget.setStyleSheet("background-color: white; border: 1px solid #999; margin-bottom: 20px;")
+                layout = QVBoxLayout(widget)
+                layout.setContentsMargins(10, 10, 10, 10)
+                layout.setSpacing(2)
+                lbl = QLabel(f"Page {page_num}")
+                lbl.setAlignment(Qt.AlignCenter)
+                lbl.setStyleSheet("font-weight: bold; color: #333; border-bottom: 1px solid #ccc; padding-bottom: 5px; margin-bottom: 5px;")
+                layout.addWidget(lbl)
+                return widget, layout
+
+            page_widget, page_layout = create_page_widget(current_page_num)
+            self.preview_layout.addWidget(page_widget)
+
+            for path in file_paths:
+                if not os.path.exists(path):
+                    continue
                 
-                lbl_num = QLabel(f"Page {i+1}")
-                lbl_num.setAlignment(Qt.AlignCenter)
-                lbl_num.setStyleSheet("font-weight: bold; color: #333; margin-bottom: 5px;")
+                img = Image.open(path)
                 
-                lbl_img = QLabel()
+                # 너비 맞춤 리사이즈 높이 계산
+                if img.width != base_width:
+                    scaled_h = int(img.height * (base_width / img.width))
+                else:
+                    scaled_h = img.height
+                
+                # 페이지 넘김 체크
+                if current_y + scaled_h > page_height:
+                    current_page_num += 1
+                    current_y = 0
+                    page_widget, page_layout = create_page_widget(current_page_num)
+                    self.preview_layout.addWidget(page_widget)
+                
+                # 이미지 추가
                 pix = QPixmap(path)
                 if not pix.isNull():
-                    scaled = pix.scaledToWidth(500, Qt.SmoothTransformation)
+                    lbl_img = QLabel()
+                    scaled = pix.scaledToWidth(480, Qt.SmoothTransformation)
                     lbl_img.setPixmap(scaled)
-                    lbl_img.setStyleSheet("border: 1px solid #999; background-color: white;")
                     lbl_img.setAlignment(Qt.AlignCenter)
+                    page_layout.addWidget(lbl_img)
                 
-                vbox.addWidget(lbl_num)
-                vbox.addWidget(lbl_img)
-                self.preview_layout.addWidget(container)
+                current_y += scaled_h
+
+        except Exception as e:
+            print(f"Preview error: {e}")
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -649,6 +698,8 @@ class MainWindow(QMainWindow):
         self.list_widget.setDragDropMode(QAbstractItemView.InternalMove)
         self.list_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.list_widget.itemClicked.connect(self.show_image_preview)
+        self.list_widget.model().rowsMoved.connect(self.on_list_order_changed)
+        self.list_widget.model().rowsRemoved.connect(self.on_list_order_changed)
         capture_layout.addWidget(self.list_widget)
         
         self.btn_delete = QPushButton("선택 삭제")
@@ -976,6 +1027,11 @@ class MainWindow(QMainWindow):
             self.show_image_preview(self.list_widget.item(last_row))
         
         self.status_label.setText(f"삭제 완료 (남은 이미지: {self.list_widget.count()}개)")
+
+    def on_list_order_changed(self):
+        if self.right_stack.currentIndex() == 1:
+            files = self.get_ordered_files()
+            self.editor_widget.load_preview(files)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Delete and self.list_widget.hasFocus():
