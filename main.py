@@ -31,9 +31,9 @@ class SelectionOverlay(QWidget):
         self.start_pos = None
         self.current_pos = None
         self.is_selecting = False
-        self.confirmed_rect = None 
         self.mode_active = False   # 영역 선택 드래그 모드
         self.is_locked = False     # 캡처 중 유튜브 조작 차단 모드
+        self.confirmed_rect = None
         
         self.setFocusPolicy(Qt.StrongFocus)
         self.hide()
@@ -45,6 +45,7 @@ class SelectionOverlay(QWidget):
         if active:
             self.setAttribute(Qt.WA_TransparentForMouseEvents, False) 
             self.setCursor(Qt.CrossCursor)
+            self.show()
         else:
             self.setAttribute(Qt.WA_TransparentForMouseEvents, True)  
             self.setCursor(Qt.ArrowCursor)
@@ -57,9 +58,11 @@ class SelectionOverlay(QWidget):
         if lock:
             self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
             self.setCursor(Qt.ForbiddenCursor) # 금지 표시 커서
+            self.show()
         else:
             self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             self.setCursor(Qt.ArrowCursor)
+            self.hide()
         self.update()
 
     def mousePressEvent(self, event):
@@ -80,61 +83,56 @@ class SelectionOverlay(QWidget):
             self.is_selecting = False
             rect = QRect(self.start_pos, self.current_pos).normalized()
             if rect.width() > 10 and rect.height() > 10:
+                global_top_left = self.mapToGlobal(rect.topLeft())
+                final_area = {
+                    'top': global_top_left.y(),
+                    'left': global_top_left.x(),
+                    'width': rect.width(),
+                    'height': rect.height()
+                }
                 self.confirmed_rect = rect
-                self.emit_selection()
+                self.selection_finished.emit(final_area)
+                self.set_active(False)
             self.update()
-
-    def keyPressEvent(self, event):
-        if self.mode_active and self.confirmed_rect:
-            if event.key() == Qt.Key_Left: self.confirmed_rect.translate(-1, 0)
-            elif event.key() == Qt.Key_Right: self.confirmed_rect.translate(1, 0)
-            elif event.key() == Qt.Key_Up: self.confirmed_rect.translate(0, -1)
-            elif event.key() == Qt.Key_Down: self.confirmed_rect.translate(0, 1)
-            self.update()
-            self.emit_selection()
-
-    def emit_selection(self):
-        if self.confirmed_rect:
-            global_top_left = self.mapToGlobal(self.confirmed_rect.topLeft())
-            final_area = {
-                'top': global_top_left.y(),
-                'left': global_top_left.x(),
-                'width': self.confirmed_rect.width(),
-                'height': self.confirmed_rect.height()
-            }
-            self.selection_finished.emit(final_area)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        active_rect = None
-        if self.is_selecting: active_rect = QRect(self.start_pos, self.current_pos).normalized()
-        elif self.confirmed_rect: active_rect = self.confirmed_rect
+        rect = None
+        if self.is_selecting and self.start_pos and self.current_pos:
+            rect = QRect(self.start_pos, self.current_pos).normalized()
+        elif self.confirmed_rect:
+            rect = self.confirmed_rect
 
-        # 1. 배경 마스킹
         if self.mode_active or self.is_locked:
-            color_alpha = 150 if self.mode_active else 50 
+            color_alpha = 160 if self.mode_active else 50
             overlay_color = QColor(0, 0, 0, color_alpha)
             path = QPainterPath()
             path.addRect(QRectF(self.rect()))
-            if active_rect:
-                path.addRect(QRectF(active_rect))
+            if rect:
+                path.addRect(QRectF(rect))
             painter.fillPath(path, overlay_color)
 
-        # 2. 테두리 그리기
-        if active_rect:
-            if self.mode_active: color = QColor(0, 174, 255) # 하늘색 (선택중)
-            elif self.is_locked: color = QColor(255, 0, 0)    # 빨간색 (캡처중/잠금)
-            else: color = QColor(0, 255, 0)                  # 연두색 (고정)
+        if rect:
+            if self.is_locked:
+                color = QColor(255, 0, 0)
+                text = "⚠️ 캡처 중 (조작 차단됨)"
+            elif self.mode_active:
+                color = QColor(0, 174, 255)
+                text = f"{rect.width()} x {rect.height()}"
+            else:
+                color = QColor(0, 255, 0)
+                text = None
 
             painter.setPen(QPen(color, 2, Qt.SolidLine))
-            painter.drawRect(active_rect)
-            
-            if self.mode_active or self.is_locked:
+            painter.drawRect(rect)
+            if text:
                 painter.setPen(Qt.white)
-                text = "영역 설정 중..." if self.mode_active else "⚠️ 캡처 중 (조작 차단됨)"
-                painter.drawText(active_rect.topLeft() + QPoint(5, -10), text)
+                painter.drawText(rect.topLeft() + QPoint(5, -10), text)
+        elif self.mode_active:
+            painter.setPen(Qt.white)
+            painter.drawText(self.rect(), Qt.AlignCenter, "마우스로 드래그하여 영역을 선택하세요.")
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -244,23 +242,22 @@ class MainWindow(QMainWindow):
         if url: self.webview.setUrl(QUrl(url if url.startswith("http") else "https://"+url))
 
     def toggle_selection_mode(self):
-        if not self.overlay.isVisible():
-            self.overlay.resize(self.webview.size())
-            self.overlay.show()
-        
-        is_active = not self.overlay.mode_active
-        self.overlay.set_active(is_active)
-        
-        if is_active:
-            self.btn_select.setText("영역 설정 중... (완료 시 클릭)")
-            self.overlay.setFocus()
-        else:
+        if self.overlay.isVisible() and self.overlay.mode_active:
+            self.overlay.set_active(False)
+            self.overlay.hide()
             self.btn_select.setText("1. 영역 선택 모드")
+        else:
+            self.overlay.resize(self.webview.size())
+            self.overlay.set_active(True)
+            self.btn_select.setText("선택 취소")
+            self.overlay.setFocus()
 
     def finish_selection(self, area_dict):
         self.capture_area_dict = area_dict
         self.btn_start.setEnabled(True)
-        self.status_label.setText("영역 설정 완료.")
+        self.btn_select.setText("1. 영역 선택 모드")
+        self.status_label.setText(f"영역 설정됨: {area_dict['width']}x{area_dict['height']}")
+        QMessageBox.information(self, "완료", "영역이 설정되었습니다. '2. 캡처 시작'을 누르세요.")
 
     def start_capture(self):
         self.btn_start.setEnabled(False)
