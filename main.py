@@ -701,6 +701,11 @@ class ScoreEditorWidget(QWidget):
                 spacing = 40
             page_num_pos_str = self.page_num_pos.currentText()
 
+            # 화질 개선 시 여백/간격도 2배로 조정하여 비율 유지
+            if self.chk_enhance.isChecked():
+                margin *= 2
+                spacing *= 2
+
             # 첫 번째 이미지로 기준 너비 설정 (PDF 생성 로직과 동일하게)
             # 화질 개선 여부에 따라 기준 너비가 달라짐
             first_img_cv = cv2.imread(file_paths[0])
@@ -1597,6 +1602,11 @@ class MainWindow(QMainWindow):
             
             page_num_pos = metadata.get('page_num_pos', '하단 중앙')
             do_enhance = metadata.get('enhance', False)
+
+            # 화질 개선 시 여백/간격도 2배로 조정하여 비율 유지
+            if do_enhance:
+                margin *= 2
+                spacing *= 2
 
             image_objects = []
             for f in files:
