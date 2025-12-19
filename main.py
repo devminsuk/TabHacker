@@ -1251,7 +1251,7 @@ class MainWindow(QMainWindow):
             candidates.sort(key=lambda item: (item[1], item[0]), reverse=True)
             
             best_x = candidates[0][0]
-            return best_x + 10 # 마디 줄 포함하고 약간의 여백
+            return best_x + 5 # 마디 줄 포함하고 약간의 여백
             
         # 5. 마디 줄이 감지되지 않은 경우: 공백(흰색 영역) 찾기
         # 원본 gray 이미지에서 가장 어두운 성분이 적은 곳
