@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QGroupBox, QListWidget, QMessageBox, QFileDialog,
                              QSplitter, QFrame, QStackedWidget, QScrollArea, 
                              QFormLayout, QAbstractItemView, QListWidgetItem,
-                             QComboBox)
+                             QComboBox, QDialog)
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtCore import Qt, pyqtSignal, QUrl, QRect, QRectF, QSize, QPoint, QTimer
 from PyQt5.QtGui import QPainter, QColor, QPen, QImage, QPixmap, QPainterPath, QRegion, QFont
@@ -414,6 +414,64 @@ class SelectionOverlay(QWidget):
             painter.setFont(font)
             painter.drawText(self.rect(), Qt.AlignCenter, "드래그하여 악보 영역을 선택하세요")
 
+class ClickableLabel(QLabel):
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+class DraggableScrollArea(QScrollArea):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWidgetResizable(True)
+        self.setCursor(Qt.OpenHandCursor)
+        self.last_pos = QPoint()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.last_pos = event.pos()
+            self.setCursor(Qt.ClosedHandCursor)
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.LeftButton:
+            delta = event.pos() - self.last_pos
+            self.last_pos = event.pos()
+            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
+            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self.setCursor(Qt.OpenHandCursor)
+        super().mouseReleaseEvent(event)
+
+class ImageDetailDialog(QDialog):
+    def __init__(self, image_path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("이미지 상세 보기 (드래그하여 이동)")
+        self.resize(1000, 800)
+        
+        layout = QVBoxLayout(self)
+        
+        scroll = DraggableScrollArea()
+        
+        label = QLabel()
+        pixmap = QPixmap(image_path)
+        if not pixmap.isNull():
+            label.setPixmap(pixmap)
+            label.adjustSize()
+        
+        scroll.setWidget(label)
+        scroll.setAlignment(Qt.AlignCenter)
+        layout.addWidget(scroll)
+        
+        btn_close = QPushButton("닫기")
+        btn_close.clicked.connect(self.close)
+        btn_close.setMinimumHeight(40)
+        layout.addWidget(btn_close)
+
 class ScoreEditorWidget(QWidget):
     """PDF 생성 전 메타데이터 입력 및 미리보기 위젯"""
     save_requested = pyqtSignal(dict)
@@ -506,6 +564,11 @@ class ScoreEditorWidget(QWidget):
         btn_layout.addWidget(self.btn_cancel)
         btn_layout.addWidget(self.btn_save)
         layout.addLayout(btn_layout)
+
+    def show_large_image(self, path):
+        if os.path.exists(path):
+            dlg = ImageDetailDialog(path, self)
+            dlg.exec_()
 
     def refresh_preview(self):
         if self.current_files:
@@ -646,7 +709,10 @@ class ScoreEditorWidget(QWidget):
                 display_h = int(new_h_pdf * scale)
                 scaled_pix = pix.scaled(display_content_width, display_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 
-                lbl_img = QLabel(current_page_widget)
+                lbl_img = ClickableLabel(current_page_widget)
+                lbl_img.setCursor(Qt.PointingHandCursor)
+                lbl_img.setToolTip("클릭하여 크게 보기")
+                lbl_img.clicked.connect(lambda p=path: self.show_large_image(p))
                 lbl_img.setPixmap(scaled_pix)
                 lbl_img.setFixedSize(display_content_width, display_h)
                 lbl_img.move(display_margin_left, int(current_y * scale))
