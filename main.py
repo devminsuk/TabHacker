@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QGroupBox, QListWidget, QMessageBox, QFileDialog,
                              QSplitter, QFrame, QStackedWidget, QScrollArea, 
                              QFormLayout, QAbstractItemView, QListWidgetItem,
-                             QComboBox, QDialog)
+                             QComboBox, QDialog, QCheckBox)
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtCore import Qt, pyqtSignal, QUrl, QRect, QRectF, QSize, QPoint, QTimer
 from PyQt5.QtGui import QPainter, QColor, QPen, QImage, QPixmap, QPainterPath, QRegion, QFont
@@ -422,6 +422,20 @@ class ClickableLabel(QLabel):
             self.clicked.emit()
         super().mousePressEvent(event)
 
+def enhance_score_image(img_bgr):
+    """이미지 선명화 및 이진화 처리 (스캔 품질)"""
+    # 1. 그레이스케일 변환
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    
+    # 2. 2배 업스케일링 (Cubic Interpolation) - 선명도 확보
+    enhanced = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+    
+    # 3. 적응형 이진화 (Adaptive Thresholding)
+    binary = cv2.adaptiveThreshold(
+        enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 10
+    )
+    return cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+
 class DraggableScrollArea(QScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -433,8 +447,20 @@ class DraggableScrollArea(QScrollArea):
         self.original_pixmap = None
         self.label = None
 
-    def set_image(self, image_path):
-        self.original_pixmap = QPixmap(image_path)
+    def set_image(self, image_path, enhance=False):
+        if enhance:
+            img = cv2.imread(image_path)
+            if img is not None:
+                processed = enhance_score_image(img)
+                rgb = cv2.cvtColor(processed, cv2.COLOR_BGR2RGB)
+                h, w, ch = rgb.shape
+                qimg = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
+                self.original_pixmap = QPixmap.fromImage(qimg)
+            else:
+                self.original_pixmap = QPixmap()
+        else:
+            self.original_pixmap = QPixmap(image_path)
+            
         if self.original_pixmap.isNull():
             return
         
@@ -484,7 +510,7 @@ class DraggableScrollArea(QScrollArea):
         super().mouseReleaseEvent(event)
 
 class ImageDetailDialog(QDialog):
-    def __init__(self, image_path, parent=None):
+    def __init__(self, image_path, enhance=False, parent=None):
         super().__init__(parent)
         self.setWindowTitle("이미지 상세 보기 (드래그:이동, 휠:확대/축소)")
         self.resize(1000, 800)
@@ -492,7 +518,7 @@ class ImageDetailDialog(QDialog):
         layout = QVBoxLayout(self)
         
         scroll = DraggableScrollArea()
-        scroll.set_image(image_path)
+        scroll.set_image(image_path, enhance)
         layout.addWidget(scroll)
         
         btn_close = QPushButton("닫기")
@@ -542,9 +568,14 @@ class ScoreEditorWidget(QWidget):
         self.page_num_pos = QComboBox()
         self.page_num_pos.addItems(["하단 중앙", "하단 우측", "상단 우측", "없음"])
         
+        self.chk_enhance = QCheckBox("화질 개선 (선명하게)")
+        self.chk_enhance.setChecked(False)
+        self.chk_enhance.stateChanged.connect(self.refresh_preview)
+        
         settings_layout.addRow("페이지 여백 (px):", self.margin_edit)
         settings_layout.addRow("이미지 간격 (px):", self.spacing_edit)
         settings_layout.addRow("페이지 번호:", self.page_num_pos)
+        settings_layout.addRow("옵션:", self.chk_enhance)
         settings_group.setLayout(settings_layout)
         top_layout.addWidget(settings_group)
         
@@ -586,7 +617,8 @@ class ScoreEditorWidget(QWidget):
             'composer': self.composer_edit.text(),
             'margin': self.margin_edit.text(),
             'spacing': self.spacing_edit.text(),
-            'page_num_pos': self.page_num_pos.currentText()
+            'page_num_pos': self.page_num_pos.currentText(),
+            'enhance': self.chk_enhance.isChecked()
         }))
         
         btn_layout.addWidget(self.btn_cancel)
@@ -595,7 +627,8 @@ class ScoreEditorWidget(QWidget):
 
     def show_large_image(self, path):
         if os.path.exists(path):
-            dlg = ImageDetailDialog(path, self)
+            enhance = self.chk_enhance.isChecked()
+            dlg = ImageDetailDialog(path, enhance, self)
             dlg.exec_()
 
     def refresh_preview(self):
@@ -624,8 +657,16 @@ class ScoreEditorWidget(QWidget):
             page_num_pos_str = self.page_num_pos.currentText()
 
             # 첫 번째 이미지로 기준 너비 설정 (PDF 생성 로직과 동일하게)
-            first_img = Image.open(file_paths[0])
-            base_width = first_img.width
+            # 화질 개선 여부에 따라 기준 너비가 달라짐
+            first_img_cv = cv2.imread(file_paths[0])
+            if first_img_cv is None: return
+            
+            if self.chk_enhance.isChecked():
+                # 업스케일링 된 크기 예측 (2배)
+                base_width = first_img_cv.shape[1] * 2
+            else:
+                base_width = first_img_cv.shape[1]
+                
             # A4 비율 (210x297mm) -> 높이 계산
             page_height = int(base_width * (297 / 210))
             
@@ -715,8 +756,17 @@ class ScoreEditorWidget(QWidget):
                 if not os.path.exists(path):
                     continue
                 
-                pix = QPixmap(path)
-                if pix.isNull(): continue
+                # OpenCV로 로드하여 처리 후 QPixmap 변환
+                img_cv = cv2.imread(path)
+                if img_cv is None: continue
+                
+                if self.chk_enhance.isChecked():
+                    img_cv = enhance_score_image(img_cv)
+                
+                rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
+                h, w, ch = rgb.shape
+                qimg = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
+                pix = QPixmap.fromImage(qimg)
                 
                 img_w = pix.width()
                 img_h = pix.height()
@@ -1476,8 +1526,19 @@ class MainWindow(QMainWindow):
                 spacing = 40
             
             page_num_pos = metadata.get('page_num_pos', '하단 중앙')
+            do_enhance = metadata.get('enhance', False)
 
-            image_objects = [Image.open(f).convert("RGB") for f in files]
+            image_objects = []
+            for f in files:
+                if do_enhance:
+                    # OpenCV로 로드 -> 처리 -> PIL 변환
+                    cv_img = cv2.imread(f)
+                    if cv_img is not None:
+                        processed = enhance_score_image(cv_img)
+                        image_objects.append(Image.fromarray(cv2.cvtColor(processed, cv2.COLOR_BGR2RGB)))
+                else:
+                    image_objects.append(Image.open(f).convert("RGB"))
+            
             base_width = image_objects[0].width
             page_height = int(base_width * (297 / 210))
             
