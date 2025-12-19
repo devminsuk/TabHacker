@@ -15,12 +15,18 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QComboBox, QDialog, QCheckBox)
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtCore import Qt, pyqtSignal, QUrl, QRect, QRectF, QSize, QPoint, QTimer
-from PyQt5.QtGui import QPainter, QColor, QPen, QImage, QPixmap, QPainterPath, QRegion, QFont
+from PyQt5.QtGui import QPainter, QColor, QPen, QImage, QPixmap, QPainterPath, QRegion, QFont, QFontDatabase
 
 from skimage.metrics import structural_similarity as compare_ssim
 
 # --- 설정 ---
 OUTPUT_FOLDER = "captured_scores"
+
+# --- 폰트 설정 ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FONT_DIR = os.path.join(BASE_DIR, "fonts")
+FONT_BOLD_PATH = os.path.join(FONT_DIR, "NotoSansKR-Bold.ttf")
+FONT_REGULAR_PATH = os.path.join(FONT_DIR, "NotoSansKR-Regular.ttf")
 
 # --- 프로페셔널 스타일시트 ---
 MODERN_STYLESHEET = """
@@ -535,6 +541,8 @@ class ScoreEditorWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_files = []
+        self.font_bold = "Arial"
+        self.font_regular = "Arial"
         
         # 메인 레이아웃 (세로 배치)
         main_layout = QVBoxLayout(self)
@@ -670,6 +678,10 @@ class ScoreEditorWidget(QWidget):
         
         main_layout.addLayout(btn_layout)
 
+    def set_font_families(self, bold_family, regular_family):
+        self.font_bold = bold_family
+        self.font_regular = regular_family
+
     def show_large_image(self, path):
         if os.path.exists(path):
             enhance = self.chk_enhance.isChecked()
@@ -764,7 +776,7 @@ class ScoreEditorWidget(QWidget):
                 if title:
                     lbl_title = QLabel(title, current_page_widget)
                     lbl_title.setAlignment(Qt.AlignCenter)
-                    font = QFont("Arial", int(title_font_size/1.3), QFont.Bold)
+                    font = QFont(self.font_bold, int(title_font_size/1.3), QFont.Bold)
                     lbl_title.setFont(font)
                     lbl_title.adjustSize()
                     
@@ -782,7 +794,7 @@ class ScoreEditorWidget(QWidget):
                 if composer:
                     lbl_comp = QLabel(composer, current_page_widget)
                     lbl_comp.setAlignment(Qt.AlignRight)
-                    font = QFont("Arial", int(comp_font_size/1.3))
+                    font = QFont(self.font_regular, int(comp_font_size/1.3))
                     lbl_comp.setFont(font)
                     lbl_comp.adjustSize()
                     
@@ -861,7 +873,7 @@ class ScoreEditorWidget(QWidget):
                     
                     txt = f"{i+1} / {total_pages}"
                     lbl_num = QLabel(txt, page_widget)
-                    font = QFont("Arial", max(8, int((base_width/50)*scale/1.3)))
+                    font = QFont(self.font_regular, max(8, int((base_width/50)*scale/1.3)))
                     lbl_num.setFont(font)
                     lbl_num.adjustSize()
                     
@@ -913,8 +925,26 @@ class MainWindow(QMainWindow):
         self.scroll_buffer = None
         self.current_scroll_filename = None
 
+        self.font_bold_family = "Arial"
+        self.font_regular_family = "Arial"
+        self.load_fonts()
+
         self.setup_ui()
         self.apply_stylesheet()
+
+    def load_fonts(self):
+        """폰트 파일 로드"""
+        if os.path.exists(FONT_BOLD_PATH):
+            id = QFontDatabase.addApplicationFont(FONT_BOLD_PATH)
+            if id != -1:
+                families = QFontDatabase.applicationFontFamilies(id)
+                if families: self.font_bold_family = families[0]
+        
+        if os.path.exists(FONT_REGULAR_PATH):
+            id = QFontDatabase.addApplicationFont(FONT_REGULAR_PATH)
+            if id != -1:
+                families = QFontDatabase.applicationFontFamilies(id)
+                if families: self.font_regular_family = families[0]
 
     def apply_stylesheet(self):
         self.setStyleSheet(MODERN_STYLESHEET)
@@ -1087,6 +1117,7 @@ class MainWindow(QMainWindow):
         self.editor_widget = ScoreEditorWidget()
         self.editor_widget.save_requested.connect(self.generate_pdf_final)
         self.editor_widget.cancel_requested.connect(self.switch_to_capture)
+        self.editor_widget.set_font_families(self.font_bold_family, self.font_regular_family)
         
         self.right_stack.addWidget(webview_container)
         self.right_stack.addWidget(self.editor_widget)
@@ -1638,11 +1669,20 @@ class MainWindow(QMainWindow):
             if title or composer:
                 draw = ImageDraw.Draw(current_page)
                 try:
-                    title_font = ImageFont.truetype("arial.ttf", size=int(base_width/30))
-                    comp_font = ImageFont.truetype("arial.ttf", size=int(base_width/60))
-                except:
-                    title_font = ImageFont.load_default()
-                    comp_font = ImageFont.load_default()
+                    title_font = ImageFont.truetype(FONT_BOLD_PATH, size=int(base_width/30))
+                except IOError:
+                    try:
+                        title_font = ImageFont.truetype("arial.ttf", size=int(base_width/30))
+                    except:
+                        title_font = ImageFont.load_default()
+                
+                try:
+                    comp_font = ImageFont.truetype(FONT_REGULAR_PATH, size=int(base_width/60))
+                except IOError:
+                    try:
+                        comp_font = ImageFont.truetype("arial.ttf", size=int(base_width/60))
+                    except:
+                        comp_font = ImageFont.load_default()
                 
                 header_offset = 0
                 if title:
@@ -1686,9 +1726,12 @@ class MainWindow(QMainWindow):
 
             if page_num_pos != "없음":
                 try:
-                    draw_font = ImageFont.truetype("arial.ttf", size=max(14, int(base_width/50)))
+                    draw_font = ImageFont.truetype(FONT_REGULAR_PATH, size=max(14, int(base_width/50)))
                 except IOError:
-                    draw_font = ImageFont.load_default()
+                    try:
+                        draw_font = ImageFont.truetype("arial.ttf", size=max(14, int(base_width/50)))
+                    except:
+                        draw_font = ImageFont.load_default()
 
                 for i, page in enumerate(final_pages, 1):
                     draw = ImageDraw.Draw(page)
