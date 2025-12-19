@@ -534,84 +534,127 @@ class ScoreEditorWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_files = []
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        
+        # 메인 레이아웃 (세로 배치)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
 
-        # 상단 설정 영역 (가로 배치)
-        top_layout = QHBoxLayout()
+        # --- 상단 설정 영역 (가로 배치) ---
+        settings_container = QWidget()
+        settings_layout = QHBoxLayout(settings_container)
+        settings_layout.setContentsMargins(0, 0, 0, 0)
+        settings_layout.setSpacing(20)
 
         # 1. 메타데이터 입력
-        info_group = QGroupBox("악보 정보 입력")
+        info_group = QGroupBox("기본 정보")
         form_layout = QFormLayout()
         form_layout.setLabelAlignment(Qt.AlignRight)
+        form_layout.setSpacing(10)
         
         self.title_edit = QLineEdit()
-        self.title_edit.setPlaceholderText("노래 제목을 입력하세요")
+        self.title_edit.setPlaceholderText("노래 제목")
+        self.title_edit.setMinimumHeight(30)
+        
         self.composer_edit = QLineEdit()
-        self.composer_edit.setPlaceholderText("작곡가/아티스트를 입력하세요")
+        self.composer_edit.setPlaceholderText("아티스트")
+        self.composer_edit.setMinimumHeight(30)
         
         self.title_edit.textChanged.connect(self.refresh_preview)
         self.composer_edit.textChanged.connect(self.refresh_preview)
         
         form_layout.addRow("제목:", self.title_edit)
-        form_layout.addRow("작곡가:", self.composer_edit)
+        form_layout.addRow("아티스트:", self.composer_edit)
         info_group.setLayout(form_layout)
-        top_layout.addWidget(info_group)
+        settings_layout.addWidget(info_group)
         
-        # 1.5 PDF 설정
-        settings_group = QGroupBox("PDF 설정")
-        settings_layout = QFormLayout()
+        # 2. PDF 설정
+        settings_group = QGroupBox("레이아웃 설정")
+        settings_form = QFormLayout()
+        settings_form.setSpacing(10)
         
         self.margin_edit = QLineEdit("60")
+        self.margin_edit.setMinimumHeight(30)
         self.spacing_edit = QLineEdit("40")
+        self.spacing_edit.setMinimumHeight(30)
+        
         self.page_num_pos = QComboBox()
         self.page_num_pos.addItems(["하단 중앙", "하단 우측", "상단 우측", "없음"])
+        self.page_num_pos.setMinimumHeight(30)
         
         self.chk_enhance = QCheckBox("화질 개선 (선명하게)")
         self.chk_enhance.setChecked(False)
         self.chk_enhance.stateChanged.connect(self.refresh_preview)
         
-        settings_layout.addRow("페이지 여백 (px):", self.margin_edit)
-        settings_layout.addRow("이미지 간격 (px):", self.spacing_edit)
-        settings_layout.addRow("페이지 번호:", self.page_num_pos)
-        settings_layout.addRow("옵션:", self.chk_enhance)
-        settings_group.setLayout(settings_layout)
-        top_layout.addWidget(settings_group)
-        
-        layout.addLayout(top_layout)
+        settings_form.addRow("여백 (px):", self.margin_edit)
+        settings_form.addRow("간격 (px):", self.spacing_edit)
+        settings_form.addRow("페이지 번호:", self.page_num_pos)
+        settings_form.addRow("옵션:", self.chk_enhance)
+        settings_group.setLayout(settings_form)
+        settings_layout.addWidget(settings_group)
         
         self.margin_edit.textChanged.connect(self.refresh_preview)
         self.spacing_edit.textChanged.connect(self.refresh_preview)
         self.page_num_pos.currentIndexChanged.connect(self.refresh_preview)
 
-        # 2. 미리보기 영역
-        preview_label = QLabel("페이지 미리보기 (왼쪽 목록에서 순서 변경 가능)")
-        preview_label.setStyleSheet("font-weight: bold; color: #555;")
-        layout.addWidget(preview_label)
+        main_layout.addWidget(settings_container)
 
+        # --- 중앙 미리보기 영역 ---
+        preview_frame = QFrame()
+        preview_frame.setFrameShape(QFrame.StyledPanel)
+        preview_frame.setStyleSheet("background-color: #525659; border: 1px solid #444;")
+        
+        preview_layout_inner = QVBoxLayout(preview_frame)
+        preview_layout_inner.setContentsMargins(0, 0, 0, 0)
+        preview_layout_inner.setSpacing(0)
+
+        # 툴바
+        preview_toolbar = QFrame()
+        preview_toolbar.setStyleSheet("background-color: #333333; border-bottom: 1px solid #222;")
+        preview_toolbar.setFixedHeight(40)
+        tb_layout = QHBoxLayout(preview_toolbar)
+        tb_layout.setContentsMargins(15, 0, 15, 0)
+        
+        lbl_preview_title = QLabel("미리보기")
+        lbl_preview_title.setStyleSheet("color: #f0f0f0; font-weight: bold; font-size: 13px;")
+        tb_layout.addWidget(lbl_preview_title)
+        tb_layout.addStretch()
+        lbl_guide = QLabel("이미지를 클릭하면 크게 볼 수 있습니다")
+        lbl_guide.setStyleSheet("color: #aaa; font-size: 11px;")
+        tb_layout.addWidget(lbl_guide)
+        
+        preview_layout_inner.addWidget(preview_toolbar)
+
+        # 스크롤 영역
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setStyleSheet("background-color: #e0e0e0; border: 1px solid #ccc;")
+        self.scroll.setStyleSheet("QScrollArea { border: none; background-color: #525659; }")
         
         self.preview_content = QWidget()
-        self.preview_content.setStyleSheet("background-color: #e0e0e0;")
+        self.preview_content.setStyleSheet("background-color: #525659;")
         self.preview_layout = QVBoxLayout(self.preview_content)
-        self.preview_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
-        self.preview_layout.setSpacing(20)
+        self.preview_layout.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+        self.preview_layout.setSpacing(30)
+        self.preview_layout.setContentsMargins(40, 40, 40, 40)
         
         self.scroll.setWidget(self.preview_content)
-        layout.addWidget(self.scroll)
+        preview_layout_inner.addWidget(self.scroll)
+        
+        main_layout.addWidget(preview_frame)
 
-        # 3. 하단 버튼
+        # --- 하단 버튼 ---
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(15)
+        
         self.btn_cancel = QPushButton("뒤로 가기")
-        self.btn_cancel.setMinimumHeight(40)
+        self.btn_cancel.setMinimumHeight(50)
+        self.btn_cancel.setCursor(Qt.PointingHandCursor)
         self.btn_cancel.clicked.connect(self.cancel_requested.emit)
         
         self.btn_save = QPushButton("PDF 저장하기")
-        self.btn_save.setObjectName("captureButton") # 초록색 스타일 재사용
-        self.btn_save.setMinimumHeight(40)
+        self.btn_save.setObjectName("captureButton")
+        self.btn_save.setMinimumHeight(50)
+        self.btn_save.setCursor(Qt.PointingHandCursor)
         self.btn_save.clicked.connect(lambda: self.save_requested.emit({
             'title': self.title_edit.text(),
             'composer': self.composer_edit.text(),
@@ -621,9 +664,10 @@ class ScoreEditorWidget(QWidget):
             'enhance': self.chk_enhance.isChecked()
         }))
         
-        btn_layout.addWidget(self.btn_cancel)
-        btn_layout.addWidget(self.btn_save)
-        layout.addLayout(btn_layout)
+        btn_layout.addWidget(self.btn_cancel, 1)
+        btn_layout.addWidget(self.btn_save, 1)
+        
+        main_layout.addLayout(btn_layout)
 
     def show_large_image(self, path):
         if os.path.exists(path):
@@ -670,8 +714,8 @@ class ScoreEditorWidget(QWidget):
             # A4 비율 (210x297mm) -> 높이 계산
             page_height = int(base_width * (297 / 210))
             
-            # 화면 표시용 스케일 (미리보기 너비 500px 기준)
-            PREVIEW_WIDTH = 500
+            # 화면 표시용 스케일 (미리보기 너비 600px 기준)
+            PREVIEW_WIDTH = 600
             scale = PREVIEW_WIDTH / base_width
             
             preview_height = int(page_height * scale)
@@ -691,12 +735,16 @@ class ScoreEditorWidget(QWidget):
             def create_page_widget(page_num):
                 widget = QWidget()
                 widget.setFixedSize(PREVIEW_WIDTH, preview_height)
-                widget.setStyleSheet("background-color: white; border: 1px solid #999; margin-bottom: 20px;")
+                # 검정색 테두리 스타일
+                widget.setStyleSheet("""
+                    background-color: white; 
+                    border: 1px solid black;
+                """)
                 
                 # 상단 식별자
                 lbl = QLabel(f"Page {page_num}", widget)
-                lbl.setStyleSheet("background-color: #eee; color: #555; font-size: 10px; padding: 2px;")
-                lbl.move(0, 0)
+                lbl.setStyleSheet("background-color: transparent; color: #999; font-size: 10px; padding: 2px; border: none;")
+                lbl.move(5, 5)
                 lbl.show()
                 
                 return widget
