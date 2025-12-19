@@ -660,7 +660,7 @@ class ScoreEditorWidget(QWidget):
         self.btn_cancel.setCursor(Qt.PointingHandCursor)
         self.btn_cancel.clicked.connect(self.cancel_requested.emit)
         
-        self.btn_save = QPushButton("PDF 저장하기")
+        self.btn_save = QPushButton("저장하기")
         self.btn_save.setObjectName("captureButton")
         self.btn_save.setMinimumHeight(50)
         self.btn_save.setCursor(Qt.PointingHandCursor)
@@ -1609,18 +1609,29 @@ class MainWindow(QMainWindow):
         if not filename_base:
             filename_base = "TAB"
             
-        path, _ = QFileDialog.getSaveFileName(
+        path, filter_selected = QFileDialog.getSaveFileName(
             self, 
-            "PDF 저장", 
-            f"{filename_base}.pdf", 
-            "PDF Files (*.pdf)"
+            "파일 저장", 
+            filename_base, 
+            "PDF Files (*.pdf);;PNG Images (*.png);;JPEG Images (*.jpg)"
         )
         
         if not path:
             return
+            
+        # 확장자 확인 및 보정
+        ext = os.path.splitext(path)[1].lower()
+        if not ext:
+            if "png" in filter_selected.lower():
+                ext = ".png"
+            elif "jpg" in filter_selected.lower():
+                ext = ".jpg"
+            else:
+                ext = ".pdf"
+            path += ext
         
         try:
-            self.status_label.setText("PDF 생성 중...")
+            self.status_label.setText("파일 생성 중...")
             QApplication.processEvents()
             
             # 설정값 파싱
@@ -1757,21 +1768,42 @@ class MainWindow(QMainWindow):
                         
                     draw.text((x_pos, y_pos), text, fill="black", font=draw_font)
 
-            final_pages[0].save(path, save_all=True, append_images=final_pages[1:])
-            
-            self.status_label.setText(f"PDF 생성 완료 ({len(final_pages)}페이지)")
+            if ext == ".pdf":
+                final_pages[0].save(path, save_all=True, append_images=final_pages[1:])
+                msg_title = "PDF 생성 완료"
+                msg_text = f"PDF가 생성되었습니다.\n\n총 페이지: {len(final_pages)}페이지"
+            else:
+                # 이미지로 저장 (여러 페이지일 경우 번호 붙임)
+                base_path, _ = os.path.splitext(path)
+                saved_count = 0
+                for i, page in enumerate(final_pages):
+                    if len(final_pages) > 1:
+                        save_path = f"{base_path}_{i+1:02d}{ext}"
+                    else:
+                        save_path = path
+                    
+                    if ext in ['.jpg', '.jpeg']:
+                        page.save(save_path, quality=95)
+                    else:
+                        page.save(save_path)
+                    saved_count += 1
+                
+                msg_title = "이미지 저장 완료"
+                msg_text = f"이미지가 저장되었습니다.\n\n저장된 파일 수: {saved_count}개"
+
+            self.status_label.setText(f"저장 완료")
             
             msg = QMessageBox(self)
-            msg.setWindowTitle("PDF 생성 완료")
-            msg.setText(f"PDF가 생성되었습니다.\n\n총 페이지: {len(final_pages)}페이지")
+            msg.setWindowTitle(msg_title)
+            msg.setText(msg_text)
             msg.setIcon(QMessageBox.Information)
             msg.setStyleSheet(MODERN_STYLESHEET)
             msg.exec_()
             self.switch_to_capture()
             
         except Exception as e:
-            self.status_label.setText(f"PDF 생성 실패")
-            QMessageBox.critical(self, "오류", f"PDF 생성 실패:\n{e}")
+            self.status_label.setText(f"저장 실패")
+            QMessageBox.critical(self, "오류", f"파일 저장 실패:\n{e}")
 
     def resizeEvent(self, event):
         if hasattr(self, 'overlay'):
