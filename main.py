@@ -1239,6 +1239,7 @@ class MainWindow(QMainWindow):
                     self.scroll_buffer = img_bgr
                     # 첫 프레임은 버퍼링만 함
                     self.status_label.setText("스크롤 캡처 시작 (버퍼링...)")
+                    self.display_cv_image(self.scroll_buffer)
                 else:
                     # 템플릿 매칭으로 겹치는 부분 찾기
                     template_width = 200
@@ -1259,6 +1260,12 @@ class MainWindow(QMainWindow):
                                 if new_part.shape[1] > 0:
                                     self.scroll_buffer = np.hstack((self.scroll_buffer, new_part))
                                     self.status_label.setText(f"이어붙이기 중... (전체 폭: {self.scroll_buffer.shape[1]}px)")
+                                    
+                                    # 미리보기: 전체 이미지가 아닌 최근 캡처 영역만큼만 표시
+                                    if self.scroll_buffer.shape[1] > w:
+                                        self.display_cv_image(self.scroll_buffer[:, -w:])
+                                    else:
+                                        self.display_cv_image(self.scroll_buffer)
                     
         except Exception as e:
             print(f"Capture Error: {e}")
@@ -1270,6 +1277,21 @@ class MainWindow(QMainWindow):
         if not path:
             path = os.path.join(OUTPUT_FOLDER, item.text())
         self.display_image(path)
+
+    def display_cv_image(self, cv_img):
+        """OpenCV 이미지를 미리보기 라벨에 표시"""
+        if cv_img is None: return
+        
+        # BGR -> RGB 변환
+        rgb_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb_img.shape
+        bytes_per_line = ch * w
+        
+        qt_img = QImage(rgb_img.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(qt_img)
+        
+        scaled_pixmap = pixmap.scaled(self.image_preview_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.image_preview_label.setPixmap(scaled_pixmap)
 
     def display_image(self, filepath):
         if os.path.exists(filepath):
