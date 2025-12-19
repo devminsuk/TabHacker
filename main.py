@@ -1565,7 +1565,7 @@ class MainWindow(QMainWindow):
         
         if title or composer:
             if title and composer:
-                filename_base = f"{title}-{composer}"
+                filename_base = f"{title} - {composer} (TAB)"
             else:
                 filename_base = title if title else composer
         else:
