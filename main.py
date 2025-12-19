@@ -425,9 +425,45 @@ class ClickableLabel(QLabel):
 class DraggableScrollArea(QScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWidgetResizable(True)
+        self.setWidgetResizable(False)
+        self.setAlignment(Qt.AlignCenter)
         self.setCursor(Qt.OpenHandCursor)
         self.last_pos = QPoint()
+        self.scale_factor = 1.0
+        self.original_pixmap = None
+        self.label = None
+
+    def set_image(self, image_path):
+        self.original_pixmap = QPixmap(image_path)
+        if self.original_pixmap.isNull():
+            return
+        
+        self.label = QLabel()
+        self.label.setPixmap(self.original_pixmap)
+        self.label.resize(self.original_pixmap.size())
+        self.setWidget(self.label)
+        self.scale_factor = 1.0
+
+    def wheelEvent(self, event):
+        if not self.original_pixmap:
+            super().wheelEvent(event)
+            return
+
+        if event.angleDelta().y() > 0:
+            self.scale_factor *= 1.1
+        else:
+            self.scale_factor /= 1.1
+        
+        self.scale_factor = max(0.1, min(self.scale_factor, 5.0))
+        
+        new_w = int(self.original_pixmap.width() * self.scale_factor)
+        new_h = int(self.original_pixmap.height() * self.scale_factor)
+        
+        self.label.setPixmap(self.original_pixmap.scaled(
+            new_w, new_h, Qt.KeepAspectRatio, Qt.SmoothTransformation
+        ))
+        self.label.resize(new_w, new_h)
+        event.accept()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -450,21 +486,13 @@ class DraggableScrollArea(QScrollArea):
 class ImageDetailDialog(QDialog):
     def __init__(self, image_path, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("이미지 상세 보기 (드래그하여 이동)")
+        self.setWindowTitle("이미지 상세 보기 (드래그:이동, 휠:확대/축소)")
         self.resize(1000, 800)
         
         layout = QVBoxLayout(self)
         
         scroll = DraggableScrollArea()
-        
-        label = QLabel()
-        pixmap = QPixmap(image_path)
-        if not pixmap.isNull():
-            label.setPixmap(pixmap)
-            label.adjustSize()
-        
-        scroll.setWidget(label)
-        scroll.setAlignment(Qt.AlignCenter)
+        scroll.set_image(image_path)
         layout.addWidget(scroll)
         
         btn_close = QPushButton("닫기")
