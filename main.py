@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 import numpy as np
 import cv2
 import imagehash
@@ -892,6 +893,7 @@ class MainWindow(QMainWindow):
         self.captured_files = []
         self.capture_counter = 0
         self.is_capturing = False  # 캡처 상태 추적
+        self.captured_source_title = None
 
         self.capture_timer = QTimer(self)
         self.capture_timer.timeout.connect(self.perform_capture)
@@ -1210,6 +1212,7 @@ class MainWindow(QMainWindow):
 
         self.captured_files = []
         self.list_widget.clear()
+        self.captured_source_title = self.webview.title()
         self.image_preview_label.setText("캡처 진행 중...")
         self.last_captured_gray = None
         self.last_hash = None
@@ -1551,10 +1554,29 @@ class MainWindow(QMainWindow):
         if not files:
             return
             
+        # 파일 이름 생성 로직
+        title = metadata.get('title', '').strip()
+        composer = metadata.get('composer', '').strip()
+        
+        if title or composer:
+            if title and composer:
+                filename_base = f"{title}-{composer}"
+            else:
+                filename_base = title if title else composer
+        else:
+            # 유튜브 제목 사용 ( - YouTube 접미사 제거)
+            page_title = self.captured_source_title if self.captured_source_title else self.webview.title()
+            filename_base = page_title.replace(" - YouTube", "") if page_title else "TAB"
+            
+        # 파일명 특수문자 제거 (윈도우 파일명 금지 문자)
+        filename_base = re.sub(r'[\\/*?:"<>|]', "", filename_base).strip()
+        if not filename_base:
+            filename_base = "TAB"
+            
         path, _ = QFileDialog.getSaveFileName(
             self, 
             "PDF 저장", 
-            "악보_결과.pdf", 
+            f"{filename_base}.pdf", 
             "PDF Files (*.pdf)"
         )
         
