@@ -995,6 +995,7 @@ class MainWindow(QMainWindow):
         
         # 헤더
         header_widget = QWidget()
+        header_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -1122,6 +1123,7 @@ class MainWindow(QMainWindow):
         self.mini_preview_label = QLabel()
         self.mini_preview_label.setAlignment(Qt.AlignCenter)
         self.mini_preview_label.setMinimumHeight(150)
+        self.mini_preview_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         self.mini_preview_label.setStyleSheet("background-color: #f0f0f0; color: #666; border-radius: 4px; border: 1px solid #d0d0d0;")
         self.mini_preview_label.hide()
         left_layout.addWidget(self.mini_preview_label)
@@ -1209,6 +1211,9 @@ class MainWindow(QMainWindow):
             self.btn_capture.setMinimumHeight(45)
             
             self.btn_pdf.setText("3. 편집 및 저장")
+            self.status_label.setFixedHeight(28)
+            self.status_label.setWordWrap(False)
+            self.status_label.setStyleSheet("QLabel#statusLabel { padding: 0px 4px; font-size: 11px; background-color: #ffffff; border: 1px solid #d0d0d0; border-radius: 4px; color: #333333; }")
             self.show()
         else:
             self.right_stack.show()
