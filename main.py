@@ -11,10 +11,10 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QLineEdit,   
                              QGroupBox, QListWidget, QMessageBox, QFileDialog,
                              QSplitter, QFrame, QStackedWidget, QScrollArea, 
-                             QFormLayout, QAbstractItemView, QListWidgetItem,
-                             QComboBox, QDialog, QCheckBox, QDesktopWidget, QSizePolicy)
-from PyQt5.QtCore import Qt, pyqtSignal, QUrl, QRect, QRectF, QSize, QPoint, QTimer
-from PyQt5.QtGui import QPainter, QColor, QPen, QImage, QPixmap, QPainterPath, QRegion, QFont, QFontDatabase
+                             QFormLayout, QAbstractItemView, QListWidgetItem, QSlider,
+                             QComboBox, QDialog, QCheckBox, QSizePolicy)
+from PyQt5.QtCore import Qt, pyqtSignal, QRect, QSize, QPoint, QTimer
+from PyQt5.QtGui import QPainter, QColor, QPen, QImage, QPixmap, QFont, QFontDatabase
 
 from skimage.metrics import structural_similarity as compare_ssim
 
@@ -421,6 +421,51 @@ def enhance_score_image(img_bgr):
     )
     return cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
 
+def cv2_to_qpixmap(img_cv):
+    """OpenCV 이미지를 QPixmap으로 변환"""
+    if img_cv is None:
+        return QPixmap()
+    # 메모리 연속성 보장
+    if not img_cv.flags['C_CONTIGUOUS']:
+        img_cv = np.ascontiguousarray(img_cv)
+    
+    rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
+    h, w, ch = rgb.shape
+    bytes_per_line = ch * w
+    qimg = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+    return QPixmap.fromImage(qimg)
+
+def qpixmap_to_cv(pixmap):
+    """QPixmap을 OpenCV 이미지(BGR)로 변환"""
+    if pixmap.isNull():
+        return None
+    img = pixmap.toImage().convertToFormat(QImage.Format_RGB888)
+    w, h = img.width(), img.height()
+    ptr = img.constBits()
+    ptr.setsize(img.sizeInBytes())
+    arr = np.array(ptr).reshape(h, img.bytesPerLine())
+    # 패딩 제거 및 BGR 변환
+    arr = arr[:, :w * 3].reshape(h, w, 3)
+    return cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+
+def get_pil_font(path, size, fallback="arial.ttf"):
+    """PIL 폰트 로드 헬퍼"""
+    try:
+        return ImageFont.truetype(path, size=size)
+    except IOError:
+        try:
+            return ImageFont.truetype(fallback, size=size)
+        except:
+            return ImageFont.load_default()
+
+def get_text_size(draw, text, font):
+    """Pillow 버전 호환 텍스트 크기 계산"""
+    if hasattr(draw, "textbbox"):
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return bbox[2] - bbox[0], bbox[3] - bbox[1]
+    else:
+        return draw.textsize(text, font=font)
+
 class DraggableScrollArea(QScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -437,10 +482,7 @@ class DraggableScrollArea(QScrollArea):
             img = cv2.imread(image_path)
             if img is not None:
                 processed = enhance_score_image(img)
-                rgb = cv2.cvtColor(processed, cv2.COLOR_BGR2RGB)
-                h, w, ch = rgb.shape
-                qimg = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
-                self.original_pixmap = QPixmap.fromImage(qimg)
+                self.original_pixmap = cv2_to_qpixmap(processed)
             else:
                 self.original_pixmap = QPixmap()
         else:
@@ -807,10 +849,7 @@ class ScoreEditorWidget(QWidget):
                 if self.chk_enhance.isChecked():
                     img_cv = enhance_score_image(img_cv)
                 
-                rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
-                h, w, ch = rgb.shape
-                qimg = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
-                pix = QPixmap.fromImage(qimg)
+                pix = cv2_to_qpixmap(img_cv)
                 
                 img_w = pix.width()
                 img_h = pix.height()
@@ -941,10 +980,23 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(8)
         
         # 헤더
+        header_widget = QWidget()
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+
         header_label = QLabel("Score Capture Pro")
         header_label.setObjectName("headerLabel")
-        header_label.setAlignment(Qt.AlignLeft)
-        left_layout.addWidget(header_label)
+        
+        self.btn_mini = QPushButton("미니모드")
+        self.btn_mini.setCheckable(True)
+        self.btn_mini.setFixedSize(80, 32)
+        self.btn_mini.setStyleSheet("font-size: 12px; background-color: #666; color: white; border-radius: 3px; padding: 0px;")
+        self.btn_mini.clicked.connect(self.toggle_mini_mode)
+
+        header_layout.addWidget(header_label)
+        header_layout.addStretch()
+        header_layout.addWidget(self.btn_mini)
+        left_layout.addWidget(header_widget)
         
         # 2. 설정 + 제어 통합
         control_group = QGroupBox("캡처 설정 및 제어")
@@ -977,6 +1029,16 @@ class MainWindow(QMainWindow):
         settings_h.addStretch()
         
         control_layout.addLayout(settings_h)
+
+        # 투명도 조절
+        opacity_layout = QHBoxLayout()
+        opacity_layout.addWidget(QLabel("투명도:"))
+        self.opacity_slider = QSlider(Qt.Horizontal)
+        self.opacity_slider.setRange(20, 100)
+        self.opacity_slider.setValue(100)
+        self.opacity_slider.valueChanged.connect(self.change_opacity)
+        opacity_layout.addWidget(self.opacity_slider)
+        control_layout.addLayout(opacity_layout)
         
         # 버튼들
         self.btn_select = QPushButton("1. 영역 선택")
@@ -997,7 +1059,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(control_group)
 
         # 3. 캡처 목록 + 미리보기 통합
-        capture_group = QGroupBox("캡처된 이미지")
+        self.capture_group = QGroupBox("캡처된 이미지")
         capture_layout = QVBoxLayout()
         capture_layout.setSpacing(6)
         capture_layout.setContentsMargins(8, 8, 8, 8)
@@ -1024,8 +1086,8 @@ class MainWindow(QMainWindow):
         self.btn_delete.clicked.connect(self.delete_selected_item)
         capture_layout.addWidget(self.btn_delete)
         
-        capture_group.setLayout(capture_layout)
-        left_layout.addWidget(capture_group, 1)
+        self.capture_group.setLayout(capture_layout)
+        left_layout.addWidget(self.capture_group, 1)
 
         # 4. PDF 생성
         self.btn_pdf = QPushButton("3. 편집 및 저장")
@@ -1082,6 +1144,62 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(splitter)
 
+    def toggle_mini_mode(self, checked):
+        left_panel = self.findChild(QFrame, "leftPanel")
+
+        if checked:
+            self.right_stack.hide()
+            self.capture_group.hide()
+            self.btn_mini.setText("일반모드")
+            
+            if left_panel:
+                left_panel.setStyleSheet("QFrame#leftPanel { border: none; background-color: #f5f5f5; }")
+                left_panel.setMaximumWidth(16777215)
+                left_panel.setMinimumWidth(0)
+                if left_panel.layout():
+                    left_panel.layout().setContentsMargins(5, 5, 5, 5)
+
+            self.setFixedSize(280, 420)
+            self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint | Qt.CustomizeWindowHint | 
+                              Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
+            
+            self.btn_select.setText("1. 영역 선택")
+            self.btn_select.setMinimumHeight(40)
+            if not self.is_capturing:
+                self.btn_capture.setText("2. 캡처 시작")
+            self.btn_capture.setMinimumHeight(45)
+            
+            self.btn_pdf.setText("3. 편집 및 저장")
+            self.show()
+        else:
+            self.right_stack.show()
+            self.capture_group.show()
+            self.btn_mini.setText("미니모드")
+            
+            if left_panel:
+                left_panel.setStyleSheet("")
+                left_panel.setMaximumWidth(320)
+                left_panel.setMinimumWidth(300)
+                if left_panel.layout():
+                    left_panel.layout().setContentsMargins(10, 10, 10, 10)
+            
+            self.setMinimumSize(1000, 600)
+            self.setMaximumSize(16777215, 16777215)
+            self.resize(1200, 700)
+            self.setWindowFlags(Qt.Window)
+            
+            self.btn_select.setText("1. 영역 선택")
+            self.btn_select.setMinimumHeight(36)
+            if not self.is_capturing:
+                self.btn_capture.setText("2. 캡처 시작")
+            self.btn_capture.setMinimumHeight(42)
+            
+            self.btn_pdf.setText("3. 편집 및 저장")
+            self.show()
+
+    def change_opacity(self, value):
+        self.setWindowOpacity(value / 100.0)
+
     def toggle_selection_mode(self):
         # 메인 윈도우를 숨겨서 화면 전체를 선택할 수 있게 함
         self.hide()
@@ -1104,12 +1222,19 @@ class MainWindow(QMainWindow):
         )
         
         self.btn_capture.setEnabled(True)
-        self.btn_select.setText("1. 영역 선택")
+        if self.btn_mini.isChecked():
+            self.btn_select.setText("1. 영역 선택")
+        else:
+            self.btn_select.setText("1. 영역 선택")
         self.status_label.setText(f"영역 설정됨 ({area_dict['width']}×{area_dict['height']})")
         
 
     def switch_to_editor(self):
         """에디터 모드로 전환"""
+        if self.btn_mini.isChecked():
+            self.btn_mini.setChecked(False)
+            self.toggle_mini_mode(False)
+
         files = self.get_ordered_files()
         if not files:
             return
@@ -1175,7 +1300,10 @@ class MainWindow(QMainWindow):
         self.is_capturing = False
         self.capture_timer.stop()
         
-        self.btn_capture.setText("2. 캡처 시작")
+        if self.btn_mini.isChecked():
+            self.btn_capture.setText("캡처 시작")
+        else:
+            self.btn_capture.setText("2. 캡처 시작")
         self.btn_capture.setObjectName("captureButton")
         self.btn_capture.setStyleSheet("")  # 스타일 재적용
         self.apply_stylesheet()
@@ -1325,14 +1453,7 @@ class MainWindow(QMainWindow):
             if self.area_indicator:
                 self.area_indicator.show()
             
-            # QPixmap -> QImage -> Numpy 변환
-            img = pixmap.toImage().convertToFormat(QImage.Format_RGB888)
-            
-            ptr = img.constBits()
-            ptr.setsize(img.sizeInBytes())
-            arr = np.array(ptr).reshape(h, img.bytesPerLine())
-            arr = arr[:, :w * 3].reshape(h, w, 3)
-            img_bgr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+            img_bgr = qpixmap_to_cv(pixmap)
             
             # 모드에 따른 분기
             if self.mode_combo.currentIndex() == 0:
@@ -1418,15 +1539,7 @@ class MainWindow(QMainWindow):
 
     def display_cv_image(self, cv_img):
         """OpenCV 이미지를 미리보기 라벨에 표시"""
-        if cv_img is None: return
-        
-        # BGR -> RGB 변환
-        rgb_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
-        h, w, ch = rgb_img.shape
-        bytes_per_line = ch * w
-        
-        qt_img = QImage(rgb_img.data, w, h, bytes_per_line, QImage.Format_RGB888)
-        self.current_original_pixmap = QPixmap.fromImage(qt_img)
+        self.current_original_pixmap = cv2_to_qpixmap(cv_img)
         self.update_preview_label()
 
     def display_image(self, filepath):
@@ -1597,40 +1710,17 @@ class MainWindow(QMainWindow):
             
             if title or composer:
                 draw = ImageDraw.Draw(current_page)
-                try:
-                    title_font = ImageFont.truetype(FONT_BOLD_PATH, size=int(base_width/30))
-                except IOError:
-                    try:
-                        title_font = ImageFont.truetype("arial.ttf", size=int(base_width/30))
-                    except:
-                        title_font = ImageFont.load_default()
-                
-                try:
-                    comp_font = ImageFont.truetype(FONT_REGULAR_PATH, size=int(base_width/60))
-                except IOError:
-                    try:
-                        comp_font = ImageFont.truetype("arial.ttf", size=int(base_width/60))
-                    except:
-                        comp_font = ImageFont.load_default()
+                title_font = get_pil_font(FONT_BOLD_PATH, int(base_width/30))
+                comp_font = get_pil_font(FONT_REGULAR_PATH, int(base_width/60))
                 
                 header_offset = 0
                 if title:
-                    if hasattr(draw, "textbbox"):
-                        bbox = draw.textbbox((0, 0), title, font=title_font)
-                        tw = bbox[2] - bbox[0]
-                        th = bbox[3] - bbox[1]
-                    else:
-                        tw, th = draw.textsize(title, font=title_font)
+                    tw, th = get_text_size(draw, title, title_font)
                     draw.text(((base_width - tw) / 2, current_y), title, fill="black", font=title_font)
                     header_offset += th + 20
                 
                 if composer:
-                    if hasattr(draw, "textbbox"):
-                        bbox = draw.textbbox((0, 0), composer, font=comp_font)
-                        cw = bbox[2] - bbox[0]
-                        ch = bbox[3] - bbox[1]
-                    else:
-                        cw, ch = draw.textsize(composer, font=comp_font)
+                    cw, ch = get_text_size(draw, composer, comp_font)
                     draw.text((base_width - margin - cw, current_y + header_offset), composer, fill="black", font=comp_font)
                     header_offset += ch + 20
                 
@@ -1654,24 +1744,12 @@ class MainWindow(QMainWindow):
             final_pages.append(current_page)
 
             if page_num_pos != "없음":
-                try:
-                    draw_font = ImageFont.truetype(FONT_REGULAR_PATH, size=max(14, int(base_width/50)))
-                except IOError:
-                    try:
-                        draw_font = ImageFont.truetype("arial.ttf", size=max(14, int(base_width/50)))
-                    except:
-                        draw_font = ImageFont.load_default()
+                draw_font = get_pil_font(FONT_REGULAR_PATH, max(14, int(base_width/50)))
 
                 for i, page in enumerate(final_pages, 1):
                     draw = ImageDraw.Draw(page)
                     text = f"{i} / {len(final_pages)}"
-                    
-                    if hasattr(draw, "textbbox"):
-                        bbox = draw.textbbox((0, 0), text, font=draw_font)
-                        text_w = bbox[2] - bbox[0]
-                        text_h = bbox[3] - bbox[1]
-                    else:
-                        text_w, text_h = draw.textsize(text, font=draw_font)
+                    text_w, text_h = get_text_size(draw, text, draw_font)
                     
                     x_pos, y_pos = 0, 0
                     if page_num_pos == "하단 중앙":
