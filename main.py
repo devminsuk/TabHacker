@@ -1270,8 +1270,7 @@ class MainWindow(QMainWindow):
             self.status_label.setStyleSheet("")
             self.show()
             
-        if self.current_original_pixmap:
-            self.update_mini_preview()
+        self.update_mini_preview()
 
     def change_opacity(self, value):
         self.setWindowOpacity(value / 100.0)
@@ -1357,6 +1356,7 @@ class MainWindow(QMainWindow):
         self.list_widget.clear()
         self.image_preview_label.setText("캡처 진행 중...")
         self.current_original_pixmap = None
+        self.update_mini_preview()
         self.last_captured_gray = None
         self.last_hash = None
         self.scroll_buffer = None
@@ -1667,12 +1667,16 @@ class MainWindow(QMainWindow):
             self.image_preview_label.setPixmap(scaled_pixmap)
 
     def update_mini_preview(self):
-        if self.mini_preview_label.isVisible() and self.current_original_pixmap and not self.current_original_pixmap.isNull():
-            target_size = self.mini_preview_label.size() - QSize(4, 4)
-            scaled = self.current_original_pixmap.scaled(
-                target_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            self.mini_preview_label.setPixmap(scaled)
+        if self.mini_preview_label.isVisible():
+            if self.current_original_pixmap and not self.current_original_pixmap.isNull():
+                target_size = self.mini_preview_label.size() - QSize(4, 4)
+                scaled = self.current_original_pixmap.scaled(
+                    target_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                self.mini_preview_label.setPixmap(scaled)
+            else:
+                self.mini_preview_label.clear()
+                self.mini_preview_label.setText("대기 중")
 
     def resizeEvent(self, event):
         self.update_preview_label()
@@ -1737,6 +1741,7 @@ class MainWindow(QMainWindow):
             self.last_captured_gray = None
             self.last_hash = None
             self.scroll_buffer = None
+            self.update_mini_preview()
             self.btn_pdf.setEnabled(False)
             self.switch_to_capture()
             self.status_label.setText("초기화 완료")
