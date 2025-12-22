@@ -1123,7 +1123,6 @@ class MainWindow(QMainWindow):
         self.mini_preview_label = QLabel()
         self.mini_preview_label.setAlignment(Qt.AlignCenter)
         self.mini_preview_label.setMinimumHeight(150)
-        self.mini_preview_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         self.mini_preview_label.setStyleSheet("background-color: #f0f0f0; color: #666; border-radius: 4px; border: 1px solid #d0d0d0;")
         self.mini_preview_label.hide()
         left_layout.addWidget(self.mini_preview_label)
@@ -1200,7 +1199,7 @@ class MainWindow(QMainWindow):
                 if left_panel.layout():
                     left_panel.layout().setContentsMargins(5, 5, 5, 5)
 
-            self.setFixedSize(320, 600)
+            self.setFixedSize(320, 500)
             self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint | Qt.CustomizeWindowHint | 
                               Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
             
