@@ -1436,49 +1436,63 @@ class MainWindow(QMainWindow):
     def perform_capture(self):
         if not self.capture_area_dict:
             return
+        
+        # 캡처 영역 크기 가져오기
+        w, h = self.capture_area_dict['width'], self.capture_area_dict['height']
             
         try:
-            # 캡처 영역 표시 위젯 숨기기 (캡처에 포함되지 않도록)
-            if self.area_indicator:
-                self.area_indicator.hide()
-                QApplication.processEvents()
-                time.sleep(0.1)
-
-            w, h = self.capture_area_dict['width'], self.capture_area_dict['height']
-            
             # 화면 캡처 (Global Coordinates)
             screen = QApplication.primaryScreen()
             # grabWindow(0)은 데스크탑 전체를 의미, 좌표는 글로벌 좌표
             pixmap = screen.grabWindow(0, self.capture_area_dict['left'], self.capture_area_dict['top'], w, h)
             
-            # 캡처 영역 표시 위젯 다시 표시
-            if self.area_indicator:
-                self.area_indicator.show()
-            
             img_bgr = qpixmap_to_cv(pixmap)
+            
+            # 테두리 영역 제외 (비교 시 오작동 방지 및 스크롤 모드에서 초록색 선 제거용)
+            border_crop = 5
+            if w > 2 * border_crop and h > 2 * border_crop:
+                img_proc = img_bgr[border_crop:-border_crop, border_crop:-border_crop]
+            else:
+                img_proc = img_bgr
             
             # 모드에 따른 분기
             if self.mode_combo.currentIndex() == 0:
                 # --- 페이지 넘김 모드 (기존 로직) ---
-                img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                img_gray = cv2.cvtColor(img_proc, cv2.COLOR_BGR2GRAY)
                 should_save = False
                 threshold = float(self.sensitivity_input.text())
                 
                 if self.last_captured_gray is None:
                     should_save = True
                 else:
-                    score, _ = compare_ssim(self.last_captured_gray, img_gray, full=True)
-                    if score < threshold:
+                    if self.last_captured_gray.shape == img_gray.shape:
+                        score, _ = compare_ssim(self.last_captured_gray, img_gray, full=True)
+                        if score < threshold:
+                            should_save = True
+                    else:
                         should_save = True
 
                 if should_save:
-                    pil_img = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
+                    # [페이지 모드] 저장 시점: 테두리를 숨기고 깨끗한 전체 이미지를 다시 캡처 (셔터 효과 발생)
+                    if self.area_indicator:
+                        self.area_indicator.hide()
+                        QApplication.processEvents()
+                        time.sleep(0.1)
+
+                    pixmap_clean = screen.grabWindow(0, self.capture_area_dict['left'], self.capture_area_dict['top'], w, h)
+                    
+                    if self.area_indicator:
+                        self.area_indicator.show()
+                    
+                    img_bgr_clean = qpixmap_to_cv(pixmap_clean)
+
+                    pil_img = Image.fromarray(cv2.cvtColor(img_bgr_clean, cv2.COLOR_BGR2RGB))
                     curr_hash = imagehash.phash(pil_img)
                     
                     if self.last_hash is None or (curr_hash - self.last_hash > 5):
                         self.capture_counter += 1
                         filename = os.path.join(OUTPUT_FOLDER, f"score_{self.capture_counter:03d}.png")
-                        cv2.imwrite(filename, img_bgr)
+                        cv2.imwrite(filename, img_bgr_clean)
                         self.captured_files.append(filename)
                         
                         item = QListWidgetItem(os.path.basename(filename))
@@ -1489,25 +1503,33 @@ class MainWindow(QMainWindow):
                         self.display_image(filename)
                         self.btn_pdf.setEnabled(True)
 
-                        self.last_captured_gray = img_gray
+                        # 다음 비교를 위해 저장된 이미지의 크롭 버전 저장
+                        if w > 2 * border_crop and h > 2 * border_crop:
+                            clean_proc = img_bgr_clean[border_crop:-border_crop, border_crop:-border_crop]
+                        else:
+                            clean_proc = img_bgr_clean
+                        
+                        self.last_captured_gray = cv2.cvtColor(clean_proc, cv2.COLOR_BGR2GRAY)
                         self.last_hash = curr_hash
                         
                         count = len(self.captured_files)
                         self.status_label.setText(f"캡처 완료 (총 {count}개)")
             else:
-                # --- 가로 스크롤 모드 (이어붙이기) ---
+                # --- 가로 스크롤 모드 (이어붙이기) --- 
+                # 깜빡임 없이 연속 처리해야 하므로, 위에서 테두리가 잘린(img_proc) 이미지를 그대로 사용합니다.
+                img_bgr_scroll = img_proc 
                 if self.scroll_buffer is None:
-                    self.scroll_buffer = img_bgr
+                    self.scroll_buffer = img_bgr_scroll
                     # 첫 프레임은 버퍼링만 함
                     self.status_label.setText("스크롤 캡처 시작 (버퍼링...)")
                     self.display_cv_image(self.scroll_buffer)
                 else:
                     # 템플릿 매칭으로 겹치는 부분 찾기
                     template_width = 200
-                    if self.scroll_buffer.shape[1] >= template_width and img_bgr.shape[1] >= template_width:
+                    if self.scroll_buffer.shape[1] >= template_width and img_bgr_scroll.shape[1] >= template_width:
                         template = self.scroll_buffer[:, -template_width:]
                         template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-                        img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                        img_gray = cv2.cvtColor(img_bgr_scroll, cv2.COLOR_BGR2GRAY)
                         
                         res = cv2.matchTemplate(img_gray, template_gray, cv2.TM_CCOEFF_NORMED)
                         _, max_val, _, max_loc = cv2.minMaxLoc(res)
@@ -1516,17 +1538,15 @@ class MainWindow(QMainWindow):
                             match_x = max_loc[0]
                             new_part_start = match_x + template_width
                             
-                            if new_part_start < img_bgr.shape[1]:
-                                new_part = img_bgr[:, new_part_start:]
+                            if new_part_start < img_bgr_scroll.shape[1]:
+                                new_part = img_bgr_scroll[:, new_part_start:]
                                 if new_part.shape[1] > 0:
                                     self.scroll_buffer = np.hstack((self.scroll_buffer, new_part))
                                     self.status_label.setText(f"이어붙이기 중... (전체 폭: {self.scroll_buffer.shape[1]}px)")
                                     
                                     # 미리보기: 전체 이미지가 아닌 최근 캡처 영역만큼만 표시
-                                    if self.scroll_buffer.shape[1] > w:
-                                        self.display_cv_image(self.scroll_buffer[:, -w:])
-                                    else:
-                                        self.display_cv_image(self.scroll_buffer)
+                                    display_w = min(self.scroll_buffer.shape[1], w)
+                                    self.display_cv_image(self.scroll_buffer[:, -display_w:])
                     
         except Exception as e:
             print(f"Capture Error: {e}")
