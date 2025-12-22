@@ -292,6 +292,7 @@ QFrame#leftPanel {
 class SelectionOverlay(QWidget):
     """영역 선택 오버레이"""
     selection_finished = pyqtSignal(dict) 
+    selection_cancelled = pyqtSignal()
     
     def __init__(self, parent=None): 
         super().__init__(parent)
@@ -318,6 +319,11 @@ class SelectionOverlay(QWidget):
         self.show()
         self.activateWindow()
         self.update()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.close()
+            self.selection_cancelled.emit()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -565,6 +571,10 @@ class ScoreEditorWidget(QWidget):
         self.font_bold = "Arial"
         self.font_regular = "Arial"
         
+        self.debounce_timer = QTimer()
+        self.debounce_timer.setSingleShot(True)
+        self.debounce_timer.timeout.connect(self.refresh_preview)
+        
         # 메인 레이아웃 (세로 배치)
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)
@@ -590,8 +600,8 @@ class ScoreEditorWidget(QWidget):
         self.composer_edit.setPlaceholderText("아티스트")
         self.composer_edit.setMinimumHeight(30)
         
-        self.title_edit.textChanged.connect(self.refresh_preview)
-        self.composer_edit.textChanged.connect(self.refresh_preview)
+        self.title_edit.textChanged.connect(self.trigger_refresh)
+        self.composer_edit.textChanged.connect(self.trigger_refresh)
         
         form_layout.addRow("제목:", self.title_edit)
         form_layout.addRow("아티스트:", self.composer_edit)
@@ -623,8 +633,8 @@ class ScoreEditorWidget(QWidget):
         settings_group.setLayout(settings_form)
         settings_layout.addWidget(settings_group)
         
-        self.margin_edit.textChanged.connect(self.refresh_preview)
-        self.spacing_edit.textChanged.connect(self.refresh_preview)
+        self.margin_edit.textChanged.connect(self.trigger_refresh)
+        self.spacing_edit.textChanged.connect(self.trigger_refresh)
         self.page_num_pos.currentIndexChanged.connect(self.refresh_preview)
 
         main_layout.addWidget(settings_container)
@@ -708,6 +718,9 @@ class ScoreEditorWidget(QWidget):
             enhance = self.chk_enhance.isChecked()
             dlg = ImageDetailDialog(path, enhance, self)
             dlg.exec_()
+
+    def trigger_refresh(self):
+        self.debounce_timer.start(500)
 
     def refresh_preview(self):
         if self.current_files:
@@ -1098,12 +1111,20 @@ class MainWindow(QMainWindow):
         """)
         self.btn_reset.clicked.connect(self.reset_all)
         
-        list_btn_layout.addWidget(self.btn_delete, 1)
         list_btn_layout.addWidget(self.btn_reset, 1)
+        list_btn_layout.addWidget(self.btn_delete, 1)
         capture_layout.addLayout(list_btn_layout)
         
         self.capture_group.setLayout(capture_layout)
         left_layout.addWidget(self.capture_group, 1)
+
+        # 미니 모드용 미리보기 (초기엔 숨김)
+        self.mini_preview_label = QLabel()
+        self.mini_preview_label.setAlignment(Qt.AlignCenter)
+        self.mini_preview_label.setMinimumHeight(150)
+        self.mini_preview_label.setStyleSheet("background-color: #333; color: #aaa; border-radius: 4px;")
+        self.mini_preview_label.hide()
+        left_layout.addWidget(self.mini_preview_label)
 
         # 4. PDF 생성
         self.btn_pdf = QPushButton("3. 편집 및 저장")
@@ -1150,6 +1171,7 @@ class MainWindow(QMainWindow):
 
         self.overlay = SelectionOverlay()
         self.overlay.selection_finished.connect(self.finish_selection)
+        self.overlay.selection_cancelled.connect(self.show)
         
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(left_panel)
@@ -1166,6 +1188,7 @@ class MainWindow(QMainWindow):
         if checked:
             self.right_stack.hide()
             self.capture_group.hide()
+            self.mini_preview_label.show()
             self.btn_mini.setText("일반모드")
             
             if left_panel:
@@ -1175,7 +1198,7 @@ class MainWindow(QMainWindow):
                 if left_panel.layout():
                     left_panel.layout().setContentsMargins(5, 5, 5, 5)
 
-            self.setFixedSize(280, 420)
+            self.setFixedSize(320, 600)
             self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint | Qt.CustomizeWindowHint | 
                               Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
             
@@ -1190,6 +1213,7 @@ class MainWindow(QMainWindow):
         else:
             self.right_stack.show()
             self.capture_group.show()
+            self.mini_preview_label.hide()
             self.btn_mini.setText("미니모드")
             
             if left_panel:
@@ -1212,6 +1236,9 @@ class MainWindow(QMainWindow):
             
             self.btn_pdf.setText("3. 편집 및 저장")
             self.show()
+            
+        if self.current_original_pixmap:
+            self.update_mini_preview()
 
     def change_opacity(self, value):
         self.setWindowOpacity(value / 100.0)
@@ -1578,11 +1605,13 @@ class MainWindow(QMainWindow):
         """OpenCV 이미지를 미리보기 라벨에 표시"""
         self.current_original_pixmap = cv2_to_qpixmap(cv_img)
         self.update_preview_label()
+        self.update_mini_preview()
 
     def display_image(self, filepath):
         if os.path.exists(filepath):
             self.current_original_pixmap = QPixmap(filepath)
             self.update_preview_label()
+            self.update_mini_preview()
 
     def update_preview_label(self):
         if self.current_original_pixmap and not self.current_original_pixmap.isNull():
@@ -1597,8 +1626,17 @@ class MainWindow(QMainWindow):
             )
             self.image_preview_label.setPixmap(scaled_pixmap)
 
+    def update_mini_preview(self):
+        if self.mini_preview_label.isVisible() and self.current_original_pixmap and not self.current_original_pixmap.isNull():
+            target_size = self.mini_preview_label.size() - QSize(4, 4)
+            scaled = self.current_original_pixmap.scaled(
+                target_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            self.mini_preview_label.setPixmap(scaled)
+
     def resizeEvent(self, event):
         self.update_preview_label()
+        self.update_mini_preview()
         super().resizeEvent(event)
 
     def get_ordered_files(self):
@@ -1616,6 +1654,11 @@ class MainWindow(QMainWindow):
         if not items:
             return
             
+        reply = QMessageBox.question(self, '삭제 확인', f'선택한 {len(items)}개의 이미지를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.',
+                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+
         for item in items:
             row = self.list_widget.row(item)
             self.list_widget.takeItem(row)
