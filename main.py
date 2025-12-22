@@ -1081,11 +1081,26 @@ class MainWindow(QMainWindow):
         self.list_widget.model().rowsRemoved.connect(self.on_list_order_changed)
         capture_layout.addWidget(self.list_widget)
         
+        # 버튼 레이아웃 (선택 삭제 / 전체 초기화)
+        list_btn_layout = QHBoxLayout()
+        
         self.btn_delete = QPushButton("선택 삭제")
         self.btn_delete.setObjectName("deleteButton")
         self.btn_delete.setMinimumHeight(28)
         self.btn_delete.clicked.connect(self.delete_selected_item)
-        capture_layout.addWidget(self.btn_delete)
+        
+        self.btn_reset = QPushButton("전체 초기화")
+        self.btn_reset.setMinimumHeight(28)
+        self.btn_reset.setStyleSheet("""
+            QPushButton { background-color: #d9534f; color: white; border: none; border-radius: 4px; }
+            QPushButton:hover { background-color: #c9302c; }
+            QPushButton:pressed { background-color: #ac2925; }
+        """)
+        self.btn_reset.clicked.connect(self.reset_all)
+        
+        list_btn_layout.addWidget(self.btn_delete, 1)
+        list_btn_layout.addWidget(self.btn_reset, 1)
+        capture_layout.addLayout(list_btn_layout)
         
         self.capture_group.setLayout(capture_layout)
         left_layout.addWidget(self.capture_group, 1)
@@ -1202,6 +1217,7 @@ class MainWindow(QMainWindow):
         self.setWindowOpacity(value / 100.0)
 
     def toggle_selection_mode(self):
+        self.switch_to_capture()
         # 메인 윈도우를 숨겨서 화면 전체를 선택할 수 있게 함
         self.hide()
         if self.area_indicator:
@@ -1243,8 +1259,6 @@ class MainWindow(QMainWindow):
         self.editor_widget.load_preview(files)
         self.right_stack.setCurrentIndex(1)
         self.status_label.setText("PDF 편집 모드")
-        self.btn_select.setEnabled(False)
-        self.btn_capture.setEnabled(False)
 
     def switch_to_capture(self):
         """캡처 모드로 복귀"""
@@ -1261,6 +1275,7 @@ class MainWindow(QMainWindow):
             self.stop_capture()
 
     def start_capture(self):
+        self.switch_to_capture()
         self.is_capturing = True
         self.btn_capture.setText("■ 캡처 중지")
         self.btn_capture.setObjectName("captureButtonActive")
@@ -1624,6 +1639,24 @@ class MainWindow(QMainWindow):
             self.show_image_preview(self.list_widget.item(last_row))
         
         self.status_label.setText(f"삭제 완료 (남은 이미지: {self.list_widget.count()}개)")
+
+    def reset_all(self):
+        """모든 데이터 초기화 및 캡처 모드 복귀"""
+        reply = QMessageBox.question(self, '초기화 확인', '모든 캡처 데이터를 삭제하고 초기화하시겠습니까?',
+                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.stop_capture()
+            self.captured_files = []
+            self.list_widget.clear()
+            self.image_preview_label.clear()
+            self.image_preview_label.setText("영역을 선택하고 캡처를 시작하세요.\n캡처된 이미지가 여기에 표시됩니다.")
+            self.current_original_pixmap = None
+            self.last_captured_gray = None
+            self.last_hash = None
+            self.scroll_buffer = None
+            self.btn_pdf.setEnabled(False)
+            self.switch_to_capture()
+            self.status_label.setText("초기화 완료")
 
     def on_list_order_changed(self):
         if self.right_stack.currentIndex() == 1:
