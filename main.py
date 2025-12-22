@@ -1,6 +1,7 @@
 import sys
 import os
 import re
+import time
 import numpy as np
 import cv2
 import imagehash
@@ -1441,6 +1442,7 @@ class MainWindow(QMainWindow):
             if self.area_indicator:
                 self.area_indicator.hide()
                 QApplication.processEvents()
+                time.sleep(0.1)
 
             w, h = self.capture_area_dict['width'], self.capture_area_dict['height']
             
