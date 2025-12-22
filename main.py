@@ -8,12 +8,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 # --- PyQt5 라이브러리 ---
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QLabel, QLineEdit, 
+                             QHBoxLayout, QPushButton, QLabel, QLineEdit,   
                              QGroupBox, QListWidget, QMessageBox, QFileDialog,
                              QSplitter, QFrame, QStackedWidget, QScrollArea, 
                              QFormLayout, QAbstractItemView, QListWidgetItem,
-                             QComboBox, QDialog, QCheckBox)
-from PyQt5.QtWebEngineWidgets import QWebEngineView
+                             QComboBox, QDialog, QCheckBox, QDesktopWidget, QSizePolicy)
 from PyQt5.QtCore import Qt, pyqtSignal, QUrl, QRect, QRectF, QSize, QPoint, QTimer
 from PyQt5.QtGui import QPainter, QColor, QPen, QImage, QPixmap, QPainterPath, QRegion, QFont, QFontDatabase
 
@@ -292,134 +291,113 @@ QFrame#leftPanel {
 class SelectionOverlay(QWidget):
     """영역 선택 오버레이"""
     selection_finished = pyqtSignal(dict) 
-
-    def __init__(self, parent=None):
+    
+    def __init__(self, parent=None): 
         super().__init__(parent)
-        self.setWindowFlags(Qt.Widget | Qt.FramelessWindowHint)
+        # 전체 화면 오버레이 설정
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setCursor(Qt.CrossCursor)
         
         self.start_pos = None
         self.current_pos = None
         self.is_selecting = False
-        self.mode_active = False
-        self.is_locked = False
-        self.confirmed_rect = None
+        self.bg_pixmap = None
+
+    def start(self):
+        """화면 캡처 후 선택 모드 시작"""
+        desktop = QApplication.desktop()
+        rect = desktop.geometry()
+        self.setGeometry(rect)
         
-        self.setFocusPolicy(Qt.StrongFocus)
-        self.hide()
-
-    def set_active(self, active):
-        self.mode_active = active
-        self.is_locked = False
-        if active:
-            self.setAttribute(Qt.WA_TransparentForMouseEvents, False) 
-            self.setCursor(Qt.CrossCursor)
-            self.show()
-        else:
-            self.setAttribute(Qt.WA_TransparentForMouseEvents, True)  
-            self.setCursor(Qt.ArrowCursor)
-        self.update()
-
-    def set_lock(self, lock):
-        self.is_locked = lock
-        self.mode_active = False
-        if lock:
-            self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
-            self.setCursor(Qt.ForbiddenCursor)
-            self.show()
-        else:
-            self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            self.setCursor(Qt.ArrowCursor)
-            self.hide()
+        # 현재 화면을 캡처하여 배경으로 사용 (Freeze 효과)
+        screen = QApplication.primaryScreen()
+        self.bg_pixmap = screen.grabWindow(0, rect.x(), rect.y(), rect.width(), rect.height())
+        
+        self.show()
+        self.activateWindow()
         self.update()
 
     def mousePressEvent(self, event):
-        if self.mode_active and event.button() == Qt.LeftButton:
+        if event.button() == Qt.LeftButton:
             self.start_pos = event.pos()
             self.current_pos = event.pos()
             self.is_selecting = True
-            self.confirmed_rect = None
             self.update()
 
     def mouseMoveEvent(self, event):
-        if self.mode_active and self.is_selecting:
+        if self.is_selecting:
             self.current_pos = event.pos()
             self.update()
 
     def mouseReleaseEvent(self, event):
-        if self.mode_active and event.button() == Qt.LeftButton:
+        if event.button() == Qt.LeftButton and self.is_selecting:
             self.is_selecting = False
             rect = QRect(self.start_pos, self.current_pos).normalized()
             if rect.width() > 10 and rect.height() > 10:
-                global_top_left = self.mapToGlobal(rect.topLeft())
                 final_area = {
-                    'top': global_top_left.y(),
-                    'left': global_top_left.x(),
+                    'top': self.y() + rect.y(),
+                    'left': self.x() + rect.x(),
                     'width': rect.width(),
                     'height': rect.height()
                 }
-                self.confirmed_rect = rect
+                self.close()
                 self.selection_finished.emit(final_area)
-                self.set_active(False)
-            self.update()
+            else:
+                self.start_pos = None
+                self.current_pos = None
+                self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        rect = None
-        if self.is_selecting and self.start_pos and self.current_pos:
-            rect = QRect(self.start_pos, self.current_pos).normalized()
-        elif self.confirmed_rect:
-            rect = self.confirmed_rect
-
-        if self.mode_active or self.is_locked:
-            color_alpha = 160 if self.mode_active else 60
-            overlay_color = QColor(0, 0, 0, color_alpha)
-            path = QPainterPath()
-            path.addRect(QRectF(self.rect()))
-            if rect:
-                path.addRect(QRectF(rect))
-            painter.fillPath(path, overlay_color)
-
-        if rect:
-            if self.is_locked:
-                pen = QPen(QColor(220, 53, 69), 2, Qt.SolidLine)
-                painter.setPen(pen)
-                painter.drawRect(rect)
+        
+        if self.bg_pixmap:
+            painter.drawPixmap(0, 0, self.bg_pixmap)
+            
+            # 배경 어둡게 처리
+            painter.fillRect(self.rect(), QColor(0, 0, 0, 100))
+            
+            if self.start_pos and self.current_pos:
+                rect = QRect(self.start_pos, self.current_pos).normalized()
                 
-                bg_rect = QRect(rect.left(), rect.top() - 28, rect.width(), 28)
-                painter.fillRect(bg_rect, QColor(220, 53, 69, 230))
+                # 선택 영역은 원본 밝기로 그리기
+                painter.drawPixmap(rect, self.bg_pixmap, rect)
                 
-                painter.setPen(Qt.white)
-                font = QFont("Segoe UI", 9, QFont.Bold)
-                painter.setFont(font)
-                painter.drawText(bg_rect, Qt.AlignCenter, "캡처 진행 중 (조작 금지)")
-                
-            elif self.mode_active:
+                # 테두리
                 pen = QPen(QColor(0, 120, 212), 2, Qt.SolidLine)
                 painter.setPen(pen)
                 painter.drawRect(rect)
                 
-                bg_rect = QRect(rect.left(), rect.top() - 26, 180, 26)
-                painter.fillRect(bg_rect, QColor(0, 120, 212, 230))
-                
+                # 사이즈 텍스트
                 painter.setPen(Qt.white)
                 font = QFont("Segoe UI", 9, QFont.Bold)
                 painter.setFont(font)
                 text = f"{rect.width()} × {rect.height()} px"
-                painter.drawText(bg_rect, Qt.AlignCenter, text)
-                
-            else:
-                pen = QPen(QColor(40, 167, 69), 2, Qt.DashLine)
-                painter.setPen(pen)
-                painter.drawRect(rect)
-                
-        elif self.mode_active:
-            painter.setPen(Qt.white)
-            font = QFont("Segoe UI", 13, QFont.Normal)
-            painter.setFont(font)
-            painter.drawText(self.rect(), Qt.AlignCenter, "드래그하여 악보 영역을 선택하세요")
+                painter.drawText(rect.topLeft() - QPoint(0, 5), text)
+        else:
+            painter.fillRect(self.rect(), QColor(0, 0, 0, 100))
+
+class CaptureAreaIndicator(QWidget):
+    """선택된 영역을 화면에 계속 표시하는 투명 위젯"""
+    def __init__(self, x, y, w, h, parent=None):
+        super().__init__(parent)
+        self.setGeometry(x, y, w, h)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)  # 마우스 이벤트를 통과시킴
+        self.border_color = QColor(0, 255, 0)  # 기본: 초록색
+        self.show()
+
+    def set_color(self, color):
+        self.border_color = color
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        pen = QPen(self.border_color, 3)
+        pen.setStyle(Qt.DashLine)
+        painter.setPen(pen)
+        painter.drawRect(0, 0, self.width() - 1, self.height() - 1)
 
 class ClickableLabel(QLabel):
     clicked = pyqtSignal()
@@ -904,20 +882,17 @@ class ScoreEditorWidget(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Score Capture Pro - YouTube 악보 자동 캡처")
-        self.resize(1300, 750)
+        self.setWindowTitle("Score Capture Pro - 화면 악보 자동 캡처")
+        self.resize(1200, 700)
         self.capture_area_dict = None
         self.captured_files = []
         self.capture_counter = 0
         self.is_capturing = False  # 캡처 상태 추적
-        self.captured_source_title = None
+        self.area_indicator = None # 선택 영역 표시 위젯
+        self.current_original_pixmap = None
 
         self.capture_timer = QTimer(self)
         self.capture_timer.timeout.connect(self.perform_capture)
-        
-        self.ad_block_timer = QTimer(self)
-        self.ad_block_timer.timeout.connect(self.remove_youtube_ads)
-        self.ad_block_timer.start(1000)
 
         self.last_captured_gray = None
         self.last_hash = None
@@ -971,28 +946,6 @@ class MainWindow(QMainWindow):
         header_label.setAlignment(Qt.AlignLeft)
         left_layout.addWidget(header_label)
         
-        # 1. URL 입력
-        url_group = QGroupBox("YouTube URL")
-        url_layout = QVBoxLayout()
-        url_layout.setSpacing(6)
-        url_layout.setContentsMargins(8, 8, 8, 8)
-        
-        url_h_layout = QHBoxLayout()
-        self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("유튜브 링크")
-        self.url_input.setMinimumHeight(32)
-        
-        btn_go = QPushButton("이동")
-        btn_go.setMinimumHeight(32)
-        btn_go.setMaximumWidth(60)
-        btn_go.clicked.connect(self.load_url)
-        
-        url_h_layout.addWidget(self.url_input)
-        url_h_layout.addWidget(btn_go)
-        url_layout.addLayout(url_h_layout)
-        url_group.setLayout(url_layout)
-        left_layout.addWidget(url_group)
-
         # 2. 설정 + 제어 통합
         control_group = QGroupBox("캡처 설정 및 제어")
         control_layout = QVBoxLayout()
@@ -1049,17 +1002,7 @@ class MainWindow(QMainWindow):
         capture_layout.setSpacing(6)
         capture_layout.setContentsMargins(8, 8, 8, 8)
         
-        # 미리보기 (위)
-        preview_section = QLabel("미리보기")
-        preview_section.setObjectName("sectionLabel")
-        capture_layout.addWidget(preview_section)
-        
-        self.image_preview_label = QLabel("선택된 이미지 없음")
-        self.image_preview_label.setObjectName("previewLabel")
-        self.image_preview_label.setAlignment(Qt.AlignCenter)
-        self.image_preview_label.setMinimumHeight(140)
-        self.image_preview_label.setMaximumHeight(140)
-        capture_layout.addWidget(self.image_preview_label)
+        # 미리보기 라벨은 오른쪽 패널로 이동
         
         # 목록 (아래)
         list_section = QLabel("목록")
@@ -1068,7 +1011,6 @@ class MainWindow(QMainWindow):
         
         self.list_widget = QListWidget()
         self.list_widget.setMinimumHeight(100)
-        self.list_widget.setMaximumHeight(120)
         self.list_widget.setDragDropMode(QAbstractItemView.InternalMove)
         self.list_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.list_widget.itemClicked.connect(self.show_image_preview)
@@ -1083,7 +1025,7 @@ class MainWindow(QMainWindow):
         capture_layout.addWidget(self.btn_delete)
         
         capture_group.setLayout(capture_layout)
-        left_layout.addWidget(capture_group)
+        left_layout.addWidget(capture_group, 1)
 
         # 4. PDF 생성
         self.btn_pdf = QPushButton("3. 편집 및 저장")
@@ -1101,17 +1043,24 @@ class MainWindow(QMainWindow):
         self.status_label.setWordWrap(True)
         left_layout.addWidget(self.status_label)
 
-        # --- 오른쪽 패널 (웹뷰) ---
+        # --- 오른쪽 패널 (대형 미리보기 및 에디터) ---
         self.right_stack = QStackedWidget()
         
-        # 페이지 0: 웹뷰
-        webview_container = QWidget()
-        webview_layout = QVBoxLayout(webview_container)
-        webview_layout.setContentsMargins(0, 0, 0, 0)
+        # 페이지 0: 캡처 대기/결과 화면
+        preview_container = QWidget()
+        preview_layout = QVBoxLayout(preview_container)
+        preview_layout.setContentsMargins(20, 20, 20, 20)
         
-        self.webview = QWebEngineView()
-        self.webview.setUrl(QUrl("https://www.youtube.com"))
-        webview_layout.addWidget(self.webview)
+        self.image_preview_label = QLabel("영역을 선택하고 캡처를 시작하세요.\n캡처된 이미지가 여기에 표시됩니다.")
+        self.image_preview_label.setObjectName("previewLabel")
+        self.image_preview_label.setAlignment(Qt.AlignCenter)
+        self.image_preview_label.setStyleSheet("background-color: #e0e0e0; border: 2px dashed #aaa; border-radius: 10px; font-size: 14px; color: #666;")
+        self.image_preview_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        
+        preview_layout.addWidget(QLabel("현재 캡처 미리보기", styleSheet="font-weight:bold; font-size:14px;"))
+        preview_layout.addWidget(self.image_preview_label, 1)
+        
+        self.right_stack.addWidget(preview_container)
         
         # 페이지 1: 에디터
         self.editor_widget = ScoreEditorWidget()
@@ -1119,10 +1068,9 @@ class MainWindow(QMainWindow):
         self.editor_widget.cancel_requested.connect(self.switch_to_capture)
         self.editor_widget.set_font_families(self.font_bold_family, self.font_regular_family)
         
-        self.right_stack.addWidget(webview_container)
         self.right_stack.addWidget(self.editor_widget)
 
-        self.overlay = SelectionOverlay(self.webview)
+        self.overlay = SelectionOverlay()
         self.overlay.selection_finished.connect(self.finish_selection)
         
         splitter = QSplitter(Qt.Horizontal)
@@ -1134,77 +1082,31 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(splitter)
 
-    def remove_youtube_ads(self):
-        """유튜브 광고 제거"""
-        ad_script = """
-        (function() {
-            const selectors = [
-                '.video-ads', '.ytp-ad-module', '.ytp-ad-overlay-container',
-                '#masthead-ad', '#player-ads', 'ytd-promoted-sparkles-renderer',
-                'ytd-display-ad-renderer', '.ad-container', '.ad-div'
-            ];
-            selectors.forEach(s => {
-                document.querySelectorAll(s).forEach(el => el.remove());
-            });
-
-            const skipButtons = ['.ytp-ad-skip-button', '.ytp-ad-skip-button-modern', '.ytp-skip-ad-button'];
-            skipButtons.forEach(s => {
-                const btn = document.querySelector(s);
-                if(btn) btn.click();
-            });
-
-            const video = document.querySelector('video');
-            if (video && document.querySelector('.ad-showing')) {
-                if (!isNaN(video.duration)) {
-                    video.currentTime = video.duration - 0.1;
-                }
-            }
-        })();
-        """
-        self.webview.page().runJavaScript(ad_script)
-
-    def set_youtube_state(self, action, value=None):
-        if action == "play":
-            self.webview.page().runJavaScript("document.querySelector('video').play();")
-        elif action == "pause":
-            self.webview.page().runJavaScript("document.querySelector('video').pause();")
-        elif action == "speed":
-            self.webview.page().runJavaScript(f"document.querySelector('video').playbackRate = {value};")
-        elif action == "quality":
-            js = "var p = document.getElementById('movie_player'); if(p){var l=p.getAvailableQualityLevels(); p.setPlaybackQualityRange(l[0]);}"
-            self.webview.page().runJavaScript(js)
-
-    def load_url(self):
-        url = self.url_input.text().strip()
-        if url:
-            self.webview.setUrl(QUrl(url if url.startswith("http") else "https://"+url))
-            self.status_label.setText("동영상 로드 완료")
-
     def toggle_selection_mode(self):
-        if self.overlay.isVisible() and self.overlay.mode_active:
-            self.overlay.set_active(False)
-            self.overlay.hide()
-            self.btn_select.setText("1. 영역 선택")
-            self.status_label.setText("선택 취소됨")
-        else:
-            self.overlay.resize(self.webview.size())
-            self.overlay.set_active(True)
-            self.btn_select.setText("선택 취소")
-            self.status_label.setText("영역을 드래그하세요")
-            self.overlay.setFocus()
+        # 메인 윈도우를 숨겨서 화면 전체를 선택할 수 있게 함
+        self.hide()
+        if self.area_indicator:
+            self.area_indicator.close()
+            self.area_indicator = None
+        self.overlay.start()
+        self.status_label.setText("영역 선택 중...")
 
     def finish_selection(self, area_dict):
+        self.show() # 메인 윈도우 복구
         self.capture_area_dict = area_dict
+        
+        # 선택 영역 표시 위젯 생성
+        if self.area_indicator:
+            self.area_indicator.close()
+        self.area_indicator = CaptureAreaIndicator(
+            area_dict['left'], area_dict['top'], 
+            area_dict['width'], area_dict['height']
+        )
+        
         self.btn_capture.setEnabled(True)
         self.btn_select.setText("1. 영역 선택")
         self.status_label.setText(f"영역 설정됨 ({area_dict['width']}×{area_dict['height']})")
         
-        msg = QMessageBox(self)
-        msg.setWindowTitle("영역 선택 완료")
-        msg.setText(f"영역이 설정되었습니다.\n\n크기: {area_dict['width']} × {area_dict['height']} px")
-        msg.setIcon(QMessageBox.Information)
-        msg.setStyleSheet(MODERN_STYLESHEET)
-        msg.exec_()
 
     def switch_to_editor(self):
         """에디터 모드로 전환"""
@@ -1212,7 +1114,6 @@ class MainWindow(QMainWindow):
         if not files:
             return
         
-        self.set_youtube_state("pause")
         self.editor_widget.load_preview(files)
         self.right_stack.setCurrentIndex(1)
         self.status_label.setText("PDF 편집 모드")
@@ -1240,16 +1141,16 @@ class MainWindow(QMainWindow):
         self.btn_capture.setStyleSheet("")  # 스타일 재적용
         self.apply_stylesheet()
         
+        if self.area_indicator:
+            self.area_indicator.set_color(QColor(255, 0, 0)) # 빨간색 (녹화 중)
+        
         self.btn_select.setEnabled(False)
         self.btn_pdf.setEnabled(False)
         
-        self.overlay.set_lock(True)
-        self.overlay.show()
-
         self.captured_files = []
         self.list_widget.clear()
-        self.captured_source_title = self.webview.title()
         self.image_preview_label.setText("캡처 진행 중...")
+        self.current_original_pixmap = None
         self.last_captured_gray = None
         self.last_hash = None
         self.scroll_buffer = None
@@ -1268,21 +1169,19 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(1000, self.run_countdown)
         else:
             self.status_label.setText("캡처 진행 중")
-            self.set_youtube_state("quality")
-            self.set_youtube_state("speed", 2.0)
-            self.set_youtube_state("play")
             self.capture_timer.start(1000)
 
     def stop_capture(self):
         self.is_capturing = False
         self.capture_timer.stop()
-        self.set_youtube_state("pause")
-        self.overlay.set_lock(False)
         
         self.btn_capture.setText("2. 캡처 시작")
         self.btn_capture.setObjectName("captureButton")
         self.btn_capture.setStyleSheet("")  # 스타일 재적용
         self.apply_stylesheet()
+        
+        if self.area_indicator:
+            self.area_indicator.set_color(QColor(0, 255, 0)) # 초록색 (대기 중)
         
         # 스크롤 모드: 캡처 종료 시 일괄 자르기 수행
         if self.mode_combo.currentIndex() == 1 and self.scroll_buffer is not None:
@@ -1410,22 +1309,30 @@ class MainWindow(QMainWindow):
             return
             
         try:
+            # 캡처 영역 표시 위젯 숨기기 (캡처에 포함되지 않도록)
+            if self.area_indicator:
+                self.area_indicator.hide()
+                QApplication.processEvents()
+
             w, h = self.capture_area_dict['width'], self.capture_area_dict['height']
-            source_top_left_global = QPoint(self.capture_area_dict['left'], self.capture_area_dict['top'])
-            source_top_left_local = self.webview.mapFromGlobal(source_top_left_global)
-            source_rect = QRect(source_top_left_local, QSize(w, h))
-
-            img = QImage(QSize(w, h), QImage.Format_ARGB32_Premultiplied)
-            self.overlay.hide()
-            painter = QPainter(img)
-            self.webview.render(painter, QPoint(), QRegion(source_rect))
-            painter.end()
-            self.overlay.show()
-
+            
+            # 화면 캡처 (Global Coordinates)
+            screen = QApplication.primaryScreen()
+            # grabWindow(0)은 데스크탑 전체를 의미, 좌표는 글로벌 좌표
+            pixmap = screen.grabWindow(0, self.capture_area_dict['left'], self.capture_area_dict['top'], w, h)
+            
+            # 캡처 영역 표시 위젯 다시 표시
+            if self.area_indicator:
+                self.area_indicator.show()
+            
+            # QPixmap -> QImage -> Numpy 변환
+            img = pixmap.toImage().convertToFormat(QImage.Format_RGB888)
+            
             ptr = img.constBits()
             ptr.setsize(img.sizeInBytes())
-            arr = np.array(ptr).reshape(h, w, 4)
-            img_bgr = cv2.cvtColor(arr, cv2.COLOR_BGRA2BGR)
+            arr = np.array(ptr).reshape(h, img.bytesPerLine())
+            arr = arr[:, :w * 3].reshape(h, w, 3)
+            img_bgr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
             
             # 모드에 따른 분기
             if self.mode_combo.currentIndex() == 0:
@@ -1519,20 +1426,30 @@ class MainWindow(QMainWindow):
         bytes_per_line = ch * w
         
         qt_img = QImage(rgb_img.data, w, h, bytes_per_line, QImage.Format_RGB888)
-        pixmap = QPixmap.fromImage(qt_img)
-        
-        scaled_pixmap = pixmap.scaled(self.image_preview_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self.image_preview_label.setPixmap(scaled_pixmap)
+        self.current_original_pixmap = QPixmap.fromImage(qt_img)
+        self.update_preview_label()
 
     def display_image(self, filepath):
         if os.path.exists(filepath):
-            pixmap = QPixmap(filepath)
-            scaled_pixmap = pixmap.scaled(
-                self.image_preview_label.size(), 
+            self.current_original_pixmap = QPixmap(filepath)
+            self.update_preview_label()
+
+    def update_preview_label(self):
+        if self.current_original_pixmap and not self.current_original_pixmap.isNull():
+            # 라벨의 테두리 등을 고려하여 약간 작게 스케일링 (10px 여유)
+            target_size = self.image_preview_label.size() - QSize(10, 10)
+            if target_size.width() <= 0 or target_size.height() <= 0: target_size = QSize(1, 1)
+            
+            scaled_pixmap = self.current_original_pixmap.scaled(
+                target_size, 
                 Qt.KeepAspectRatio, 
                 Qt.SmoothTransformation
             )
             self.image_preview_label.setPixmap(scaled_pixmap)
+
+    def resizeEvent(self, event):
+        self.update_preview_label()
+        super().resizeEvent(event)
 
     def get_ordered_files(self):
         """리스트 위젯의 순서대로 파일 경로 반환"""
@@ -1565,6 +1482,7 @@ class MainWindow(QMainWindow):
             self.image_preview_label.clear()
             self.image_preview_label.setText("선택된 이미지 없음")
             self.btn_pdf.setEnabled(False)
+            self.current_original_pixmap = None
         else:
             last_row = self.list_widget.count() - 1
             self.list_widget.setCurrentRow(last_row)
@@ -1601,7 +1519,7 @@ class MainWindow(QMainWindow):
                 filename_base = title if title else composer
         else:
             # 유튜브 제목 사용 ( - YouTube 접미사 제거)
-            page_title = self.captured_source_title if self.captured_source_title else self.webview.title()
+            page_title = "Captured Score"
             filename_base = page_title.replace(" - YouTube", "") if page_title else "TAB"
             
         # 파일명 특수문자 제거 (윈도우 파일명 금지 문자)
@@ -1805,10 +1723,10 @@ class MainWindow(QMainWindow):
             self.status_label.setText(f"저장 실패")
             QMessageBox.critical(self, "오류", f"파일 저장 실패:\n{e}")
 
-    def resizeEvent(self, event):
-        if hasattr(self, 'overlay'):
-            self.overlay.resize(self.webview.size())
-        super().resizeEvent(event)
+    def closeEvent(self, event):
+        if self.area_indicator:
+            self.area_indicator.close()
+        super().closeEvent(event)
 
 
 if __name__ == "__main__":
