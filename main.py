@@ -748,9 +748,11 @@ class ScoreEditorWidget(QWidget):
             page_num_pos_str = self.page_num_pos.currentText()
 
             # 화질 개선 시 여백/간격도 2배로 조정하여 비율 유지
+            enhance_ratio = 1
             if self.chk_enhance.isChecked():
                 margin *= 2
                 spacing *= 2
+                enhance_ratio = 2
 
             # 첫 번째 이미지로 기준 너비 설정 (PDF 생성 로직과 동일하게)
             # 화질 개선 여부에 따라 기준 너비가 달라짐
@@ -823,7 +825,7 @@ class ScoreEditorWidget(QWidget):
                     lbl_title.move(x_pos, y_pos)
                     lbl_title.show()
                     
-                    header_offset += (t_h / scale) + 20
+                    header_offset += (t_h / scale) + (20 * enhance_ratio)
 
                 if composer:
                     lbl_comp = QLabel(composer, current_page_widget)
@@ -841,9 +843,9 @@ class ScoreEditorWidget(QWidget):
                     lbl_comp.move(x_pos, y_pos)
                     lbl_comp.show()
                     
-                    header_offset += (c_h / scale) + 20
+                    header_offset += (c_h / scale) + (20 * enhance_ratio)
                 
-                current_y += header_offset + 60
+                current_y += header_offset + (60 * enhance_ratio)
 
             # 이미지 배치
             content_width_pdf = base_width - (margin * 2)
@@ -1813,9 +1815,11 @@ class MainWindow(QMainWindow):
             do_enhance = metadata.get('enhance', False)
 
             # 화질 개선 시 여백/간격도 2배로 조정하여 비율 유지
+            enhance_ratio = 1
             if do_enhance:
                 margin *= 2
                 spacing *= 2
+                enhance_ratio = 2
 
             image_objects = []
             for f in files:
@@ -1853,14 +1857,14 @@ class MainWindow(QMainWindow):
                 if title:
                     tw, th = get_text_size(draw, title, title_font)
                     draw.text(((base_width - tw) / 2, current_y), title, fill="black", font=title_font)
-                    header_offset += th + 20
+                    header_offset += th + (20 * enhance_ratio)
                 
                 if composer:
                     cw, ch = get_text_size(draw, composer, comp_font)
                     draw.text((base_width - margin - cw, current_y + header_offset), composer, fill="black", font=comp_font)
-                    header_offset += ch + 20
+                    header_offset += ch + (20 * enhance_ratio)
                 
-                current_y += header_offset + 100
+                current_y += header_offset + (100 * enhance_ratio)
 
             for img in image_objects:
                 if img.width != content_width:
