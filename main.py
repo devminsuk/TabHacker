@@ -1559,19 +1559,34 @@ class MainWindow(QMainWindow):
         w, h = self.capture_area_dict['width'], self.capture_area_dict['height']
             
         try:
+            is_scroll_mode = (self.mode_combo.currentIndex() == 1)
+
+            # 스크롤 모드일 경우: 캡처 전 인디케이터 숨김
+            if is_scroll_mode and self.area_indicator:
+                self.area_indicator.hide()
+                QApplication.processEvents()
+                time.sleep(0.2)
+
             # 화면 캡처 (Global Coordinates)
             screen = QApplication.primaryScreen()
             # grabWindow(0)은 데스크탑 전체를 의미, 좌표는 글로벌 좌표
             pixmap = screen.grabWindow(0, self.capture_area_dict['left'], self.capture_area_dict['top'], w, h)
             
+            # 스크롤 모드일 경우: 캡처 후 인디케이터 복구
+            if is_scroll_mode and self.area_indicator:
+                self.area_indicator.show()
+
             img_bgr = qpixmap_to_cv(pixmap)
             
             # 테두리 영역 제외 (비교 시 오작동 방지 및 스크롤 모드에서 초록색 선 제거용)
-            border_crop = 5
-            if w > 2 * border_crop and h > 2 * border_crop:
-                img_proc = img_bgr[border_crop:-border_crop, border_crop:-border_crop]
-            else:
+            if is_scroll_mode:
                 img_proc = img_bgr
+            else:
+                border_crop = 5
+                if w > 2 * border_crop and h > 2 * border_crop:
+                    img_proc = img_bgr[border_crop:-border_crop, border_crop:-border_crop]
+                else:
+                    img_proc = img_bgr
             
             # 모드에 따른 분기
             if self.mode_combo.currentIndex() == 0:
@@ -1634,7 +1649,6 @@ class MainWindow(QMainWindow):
                         self.status_label.setText(f"캡처 완료 (총 {count}개)")
             else:
                 # --- 가로 스크롤 모드 (이어붙이기) --- 
-                # 깜빡임 없이 연속 처리해야 하므로, 위에서 테두리가 잘린(img_proc) 이미지를 그대로 사용합니다.
                 img_bgr_scroll = img_proc 
                 if self.scroll_buffer is None:
                     self.scroll_buffer = img_bgr_scroll
