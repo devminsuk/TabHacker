@@ -1405,6 +1405,9 @@ class MainWindow(QMainWindow):
         self.run_countdown()
 
     def run_countdown(self):
+        if not self.is_capturing:
+            return
+
         if self.countdown_value > 0:
             self.status_label.setText(f"{self.countdown_value}초 후 시작...")
             self.countdown_value -= 1
