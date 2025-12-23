@@ -30,8 +30,8 @@ FONT_REGULAR_PATH = os.path.join(FONT_DIR, "NotoSansKR-Regular.ttf")
 
 # --- 프로페셔널 스타일시트 ---
 MODERN_STYLESHEET = """
-/* 메인 윈도우 */
-QMainWindow {
+/* 메인 윈도우 및 다이얼로그 (다크모드 대응) */
+QMainWindow, QDialog {
     background-color: #f5f5f5;
 }
 
@@ -77,6 +77,28 @@ QLineEdit:focus {
 
 QLineEdit::placeholder {
     color: #999999;
+}
+
+/* 콤보박스 */
+QComboBox {
+    background-color: #ffffff;
+    border: 1px solid #d0d0d0;
+    border-radius: 4px;
+    padding: 4px 10px;
+    color: #333333;
+}
+
+QComboBox:hover {
+    border: 1px solid #0078d4;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #ffffff;
+    color: #333333;
+    selection-background-color: #0078d4;
+    selection-color: #ffffff;
+    border: 1px solid #d0d0d0;
+    outline: none;
 }
 
 /* 기본 버튼 */
