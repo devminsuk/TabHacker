@@ -1198,7 +1198,7 @@ class MainWindow(QMainWindow):
 
         self.overlay = SelectionOverlay()
         self.overlay.selection_finished.connect(self.finish_selection)
-        self.overlay.selection_cancelled.connect(self.show)
+        self.overlay.selection_cancelled.connect(self.on_selection_cancelled)
         
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(left_panel)
@@ -1326,6 +1326,20 @@ class MainWindow(QMainWindow):
             self.btn_select.setText("1. 영역 선택")
         self.status_label.setText(f"영역 설정됨 ({area_dict['width']}×{area_dict['height']})")
         
+    def on_selection_cancelled(self):
+        self.show()
+        if self.capture_area_dict:
+            if self.area_indicator:
+                self.area_indicator.close()
+            self.area_indicator = CaptureAreaIndicator(
+                self.capture_area_dict['left'], 
+                self.capture_area_dict['top'], 
+                self.capture_area_dict['width'], 
+                self.capture_area_dict['height']
+            )
+            self.status_label.setText(f"영역 설정됨 ({self.capture_area_dict['width']}×{self.capture_area_dict['height']})")
+        else:
+            self.status_label.setText("준비 완료")
 
     def switch_to_editor(self):
         """에디터 모드로 전환"""
