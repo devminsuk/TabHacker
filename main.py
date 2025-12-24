@@ -1077,6 +1077,11 @@ class MainWindow(QMainWindow):
         self.opacity_slider.setValue(100)
         self.opacity_slider.valueChanged.connect(self.change_opacity)
         opacity_layout.addWidget(self.opacity_slider)
+        
+        self.chk_always_on_top = QCheckBox("항상 위")
+        self.chk_always_on_top.setStyleSheet("margin-left: 5px;")
+        self.chk_always_on_top.stateChanged.connect(self.toggle_always_on_top)
+        opacity_layout.addWidget(self.chk_always_on_top)
         control_layout.addLayout(opacity_layout)
         
         # 버튼들
@@ -1226,7 +1231,7 @@ class MainWindow(QMainWindow):
                     left_panel.layout().setContentsMargins(5, 5, 5, 5)
 
             self.setFixedSize(320, 460)
-            self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint | Qt.CustomizeWindowHint | 
+            self.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint | Qt.CustomizeWindowHint | 
                               Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
             
             self.buttons_layout.setDirection(QBoxLayout.LeftToRight)
@@ -1250,6 +1255,8 @@ class MainWindow(QMainWindow):
             self.status_label.setWordWrap(False)
             self.status_label.setStyleSheet("QLabel#statusLabel { padding: 0px 4px; font-size: 11px; background-color: #ffffff; border: 1px solid #d0d0d0; border-radius: 4px; color: #333333; }")
             self.show()
+            self.raise_()
+            self.activateWindow()
         else:
             self.right_stack.show()
             self.capture_group.show()
@@ -1266,7 +1273,12 @@ class MainWindow(QMainWindow):
             self.setMinimumSize(1000, 600)
             self.setMaximumSize(16777215, 16777215)
             self.resize(1200, 700)
-            self.setWindowFlags(Qt.Window)
+            
+            # 일반 모드로 돌아올 때 '항상 위' 체크 여부 확인
+            flags = Qt.Window
+            if hasattr(self, 'chk_always_on_top') and self.chk_always_on_top.isChecked():
+                flags |= Qt.WindowStaysOnTopHint
+            self.setWindowFlags(flags)
             
             self.buttons_layout.setDirection(QBoxLayout.TopToBottom)
             
@@ -1291,8 +1303,22 @@ class MainWindow(QMainWindow):
             self.status_label.setWordWrap(True)
             self.status_label.setStyleSheet("")
             self.show()
+            self.raise_()
+            self.activateWindow()
             
         self.update_mini_preview()
+
+    def toggle_always_on_top(self, state):
+        if self.btn_mini.isChecked():
+            return # 미니모드는 이미 항상 위에 표시됨
+            
+        if state == Qt.Checked:
+            self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        else:
+            self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     def change_opacity(self, value):
         self.setWindowOpacity(value / 100.0)
