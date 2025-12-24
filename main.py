@@ -2026,9 +2026,14 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "오류", f"파일 저장 실패:\n{e}")
 
     def closeEvent(self, event):
+        if self.is_capturing:
+            self.stop_capture() 
         if self.area_indicator:
             self.area_indicator.close()
+        if hasattr(self, 'overlay') and self.overlay:
+            self.overlay.close()
         super().closeEvent(event)
+        QApplication.instance().quit()
 
 
 if __name__ == "__main__":
