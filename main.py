@@ -495,6 +495,260 @@ def get_text_size(draw, text, font):
     else:
         return draw.textsize(text, font=font)
 
+def calculate_best_cut_point(img, min_x, max_x):
+    """이미지에서 최적의 자르기 위치(세로선)를 찾습니다."""
+    h, w = img.shape[:2]
+    if min_x >= max_x or max_x > w:
+        return None
+        
+    roi = img[:, min_x:max_x]
+    
+    # 1. 전처리: 그레이스케일 -> 이진화
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+    
+    # 2. 세로선 추출
+    line_height = max(int(h * 0.3), 10) 
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, line_height))
+    vertical_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+    
+    # 3. 수직 투영
+    col_sums = np.sum(vertical_lines, axis=0) / 255
+    
+    # 4. 피크 검출
+    candidates = []
+    min_line_pixels = line_height * 0.5 
+    
+    for x in range(1, len(col_sums) - 1):
+        val = col_sums[x]
+        if val > min_line_pixels:
+            if val >= col_sums[x-1] and val >= col_sums[x+1]:
+                if not candidates or (min_x + x) - candidates[-1][0] > 5:
+                    candidates.append((min_x + x, val))
+    
+    if candidates:
+        candidates.sort(key=lambda item: (item[1], item[0]), reverse=True)
+        best_x = candidates[0][0]
+        return best_x + 5
+        
+    # 5. 공백 찾기
+    inverted_gray = 255 - gray
+    col_sums_gray = np.sum(inverted_gray, axis=0)
+    
+    kernel_size = 5
+    smoothed = np.convolve(col_sums_gray, np.ones(kernel_size)/kernel_size, mode='valid')
+    
+    if len(smoothed) > 0:
+        min_val_idx = np.argmin(smoothed)
+        return min_x + min_val_idx + (kernel_size // 2)
+        
+    return min_x + np.argmin(col_sums_gray)
+
+class SlicerCanvas(QWidget):
+    point_added = pyqtSignal(int)
+    point_removed = pyqtSignal(int)
+
+    def __init__(self, pixmap, parent=None):
+        super().__init__(parent)
+        self.pixmap = pixmap
+        self.scale_factor = 1.0
+        self.cut_points = []
+        self.setFixedSize(pixmap.size())
+        self.setCursor(Qt.CrossCursor)
+        self.setMouseTracking(True)
+        self.hover_x = -1
+
+    def set_cut_points(self, points):
+        self.cut_points = sorted(list(set(points)))
+        self.update()
+
+    def wheelEvent(self, event):
+        if event.modifiers() & Qt.ControlModifier:
+            if event.angleDelta().y() > 0:
+                self.scale_factor *= 1.1
+            else:
+                self.scale_factor /= 1.1
+            
+            self.scale_factor = max(0.1, min(self.scale_factor, 5.0))
+            
+            new_size = self.pixmap.size() * self.scale_factor
+            self.setFixedSize(new_size)
+            self.update()
+            event.accept()
+        else:
+            event.ignore()
+
+    def mouseMoveEvent(self, event):
+        self.hover_x = int(event.pos().x() / self.scale_factor)
+        self.update()
+
+    def mousePressEvent(self, event):
+        sx = event.pos().x()
+        x = int(sx / self.scale_factor)
+        x = max(0, min(x, self.pixmap.width()))
+        
+        if event.button() == Qt.LeftButton:
+            self.cut_points.append(x)
+            self.cut_points.sort()
+            self.point_added.emit(x)
+            self.update()
+        elif event.button() == Qt.RightButton:
+            closest = -1
+            min_dist_screen = 20
+            for p in self.cut_points:
+                p_screen = p * self.scale_factor
+                dist = abs(p_screen - sx)
+                if dist < min_dist_screen:
+                    min_dist_screen = dist
+                    closest = p
+            if closest != -1:
+                self.cut_points.remove(closest)
+                self.point_removed.emit(closest)
+                self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.scale(self.scale_factor, self.scale_factor)
+        painter.drawPixmap(0, 0, self.pixmap)
+        
+        pen = QPen(QColor(255, 0, 0), 2.0 / self.scale_factor)
+        painter.setPen(pen)
+        h = self.pixmap.height()
+        for x in self.cut_points:
+            painter.drawLine(x, 0, x, h)
+            
+        if 0 <= self.hover_x < self.pixmap.width():
+            pen_hover = QPen(QColor(0, 120, 212, 150), 1.0 / self.scale_factor, Qt.DashLine)
+            painter.setPen(pen_hover)
+            painter.drawLine(self.hover_x, 0, self.hover_x, h)
+
+class ScrollSlicerDialog(QDialog):
+    def __init__(self, image, target_width, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("스크롤 캡처 자르기 편집")
+        self.resize(1200, 800)
+        self.image = image
+        self.target_width = target_width
+        
+        layout = QVBoxLayout(self)
+        
+        info_layout = QHBoxLayout()
+        lbl_info = QLabel("✂️ 이미지를 클릭하여 자를 위치(빨간선)를 추가하세요. (우클릭: 삭제, Ctrl+휠: 확대/축소)")
+        lbl_info.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
+        info_layout.addWidget(lbl_info)
+        info_layout.addStretch()
+        layout.addLayout(info_layout)
+        
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setAlignment(Qt.AlignCenter)
+        
+        self.pixmap = cv2_to_qpixmap(image)
+        self.canvas = SlicerCanvas(self.pixmap)
+        self.scroll.setWidget(self.canvas)
+        layout.addWidget(self.scroll)
+        
+        btn_layout = QHBoxLayout()
+        
+        btn_auto = QPushButton("자동 감지 실행")
+        btn_auto.setMinimumHeight(40)
+        btn_auto.clicked.connect(self.run_auto_detect)
+        
+        btn_clear = QPushButton("모두 지우기")
+        btn_clear.setMinimumHeight(40)
+        btn_clear.clicked.connect(self.clear_all_points)
+        
+        self.lbl_count = QLabel("예상 조각 수: -개")
+        self.lbl_count.setStyleSheet("font-size: 13px; font-weight: bold; color: #0078d4; margin-left: 15px;")
+        
+        btn_cancel = QPushButton("취소")
+        btn_cancel.setMinimumHeight(40)
+        btn_cancel.clicked.connect(self.reject)
+        
+        btn_save = QPushButton("자르기 및 저장")
+        btn_save.setMinimumHeight(40)
+        btn_save.setStyleSheet("background-color: #0078d4; color: white; font-weight: bold;")
+        btn_save.clicked.connect(self.accept)
+        
+        btn_layout.addWidget(btn_auto)
+        btn_layout.addWidget(btn_clear)
+        btn_layout.addWidget(self.lbl_count)
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_cancel)
+        btn_layout.addWidget(btn_save)
+        
+        layout.addLayout(btn_layout)
+        
+        self.canvas.point_added.connect(lambda _: self.update_slice_count())
+        self.canvas.point_removed.connect(lambda _: self.update_slice_count())
+        
+        QTimer.singleShot(100, self.run_auto_detect)
+
+    def clear_all_points(self):
+        self.canvas.set_cut_points([])
+        self.update_slice_count()
+
+    def run_auto_detect(self):
+        points = []
+        total_width = self.image.shape[1]
+        current_x = 0
+        
+        while current_x < total_width:
+            if total_width - current_x <= self.target_width * 1.2:
+                break
+            
+            search_min = int(self.target_width * 0.8)
+            search_max = int(self.target_width * 1.2)
+            
+            cut_x = calculate_best_cut_point(self.image, current_x + search_min, current_x + search_max)
+            
+            if cut_x:
+                points.append(cut_x)
+                current_x = cut_x
+            else:
+                current_x += self.target_width
+                points.append(current_x)
+        
+        self.canvas.set_cut_points(points)
+        self.update_slice_count()
+
+    def update_slice_count(self):
+        points = sorted(list(set(self.canvas.cut_points)))
+        count = 0
+        start_x = 0
+        h, w = self.image.shape[:2]
+        
+        calc_points = points.copy()
+        if not calc_points or calc_points[-1] < w:
+            calc_points.append(w)
+            
+        for x in calc_points:
+            if x > start_x:
+                x = min(x, w)
+                if x - start_x > 50:
+                    count += 1
+                start_x = x
+        
+        self.lbl_count.setText(f"예상 조각 수: {count}개")
+
+    def get_sliced_images(self):
+        points = sorted(list(set(self.canvas.cut_points)))
+        images = []
+        start_x = 0
+        h, w = self.image.shape[:2]
+        
+        if not points or points[-1] < w:
+            points.append(w)
+            
+        for x in points:
+            if x > start_x:
+                x = min(x, w)
+                img_chunk = self.image[:, start_x:x]
+                if img_chunk.shape[1] > 50:
+                    images.append(img_chunk)
+                start_x = x
+        return images
+
 class DraggableScrollArea(QScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1461,41 +1715,18 @@ class MainWindow(QMainWindow):
         
         # 스크롤 모드: 캡처 종료 시 일괄 자르기 수행
         if self.mode_combo.currentIndex() == 1 and self.scroll_buffer is not None:
-            self.status_label.setText("이미지 분석 및 자르는 중...")
+            self.status_label.setText("편집 창을 여는 중...")
             QApplication.processEvents()
             
-            full_img = self.scroll_buffer
-            total_width = full_img.shape[1]
-            target_w = self.capture_area_dict['width']
+            dlg = ScrollSlicerDialog(self.scroll_buffer, self.capture_area_dict['width'], self)
+            if dlg.exec_() == QDialog.Accepted:
+                sliced_images = dlg.get_sliced_images()
+                for img in sliced_images:
+                    self._save_image_to_list(img)
+                self.status_label.setText(f"스크롤 캡처 완료 ({len(sliced_images)}장)")
+            else:
+                self.status_label.setText("스크롤 캡처 취소됨")
             
-            current_x = 0
-            
-            while current_x < total_width:
-                # 남은 길이가 목표 너비의 1.2배 이하면 마지막 조각으로 저장
-                if total_width - current_x <= target_w * 1.2:
-                    page_img = full_img[:, current_x:]
-                    if page_img.shape[1] > 50: # 너무 작은 조각 제외
-                        self._save_image_to_list(page_img)
-                    break
-                
-                # 자를 위치 탐색 (목표 너비의 80% ~ 120% 사이)
-                search_min = int(target_w * 0.8)
-                search_max = int(target_w * 1.2)
-                
-                # 전체 이미지 범위 내에서 탐색
-                cut_x = self.find_best_cut_point(full_img, current_x + search_min, current_x + search_max)
-                
-                if cut_x:
-                    page_img = full_img[:, current_x:cut_x]
-                    self._save_image_to_list(page_img)
-                    current_x = cut_x
-                else:
-                    # 적절한 자를 위치를 못 찾으면 강제로 target_w 만큼 자름
-                    cut_x = current_x + target_w
-                    page_img = full_img[:, current_x:cut_x]
-                    self._save_image_to_list(page_img)
-                    current_x = cut_x
-
             self.scroll_buffer = None
 
         self.btn_select.setEnabled(True)
@@ -1516,69 +1747,6 @@ class MainWindow(QMainWindow):
         self.list_widget.addItem(item)
         self.list_widget.scrollToBottom()
         self.display_image(filename)
-
-    def find_best_cut_point(self, img, min_x, max_x):
-        """이미지에서 최적의 자르기 위치(세로선)를 찾습니다."""
-        h, w = img.shape[:2]
-        if min_x >= max_x or max_x > w:
-            return None
-            
-        roi = img[:, min_x:max_x]
-        
-        # 1. 전처리: 그레이스케일 -> 이진화
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        # 악보는 흰 배경에 검은 선이므로, 반전시켜서 선을 찾음 (THRESH_BINARY_INV)
-        # 임계값 200은 일반적인 악보에서 적절함
-        _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
-        
-        # 2. 세로선 추출 (Morphological Open)
-        # 높이의 30% 이상 되는 세로선만 남김 (음표 기둥 등 제거 목적)
-        line_height = max(int(h * 0.3), 10) 
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, line_height))
-        vertical_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
-        
-        # 3. 수직 투영 (Vertical Projection)
-        col_sums = np.sum(vertical_lines, axis=0) / 255  # 픽셀 수로 변환
-        
-        # 4. 피크 검출 (마디 줄 후보)
-        candidates = []
-        # 최소 10픽셀 이상 높이의 선이 감지되어야 함
-        min_line_pixels = line_height * 0.5 
-        
-        for x in range(1, len(col_sums) - 1):
-            val = col_sums[x]
-            if val > min_line_pixels:
-                # 로컬 피크 확인 (주변보다 값이 크거나 같음)
-                if val >= col_sums[x-1] and val >= col_sums[x+1]:
-                    # 중복 피크 방지 (인접한 픽셀이 계속 피크일 경우 하나만)
-                    if not candidates or (min_x + x) - candidates[-1][0] > 5:
-                        candidates.append((min_x + x, val))
-        
-        if candidates:
-            # 가장 확실한 선(가장 긴 선)을 선택하거나, 
-            # 여러 개라면 검색 범위의 끝부분(오른쪽)에 가까운 것을 선호할 수 있음.
-            # 여기서는 '가장 긴 선'을 최우선으로 하되, 비슷하면 오른쪽 선호
-            
-            # 정렬: 1순위 길이(내림차순), 2순위 x좌표(내림차순)
-            candidates.sort(key=lambda item: (item[1], item[0]), reverse=True)
-            
-            best_x = candidates[0][0]
-            return best_x + 5 # 마디 줄 포함하고 약간의 여백
-            
-        # 5. 마디 줄이 감지되지 않은 경우: 공백(흰색 영역) 찾기
-        # 원본 gray 이미지에서 가장 어두운 성분이 적은 곳
-        inverted_gray = 255 - gray
-        col_sums_gray = np.sum(inverted_gray, axis=0)
-        
-        # 검색 범위 내에서 가장 흰 부분 찾기 (스무딩 적용)
-        kernel_size = 5
-        smoothed = np.convolve(col_sums_gray, np.ones(kernel_size)/kernel_size, mode='valid')
-        
-        if len(smoothed) > 0:
-            min_val_idx = np.argmin(smoothed)
-            return min_x + min_val_idx + (kernel_size // 2)
-            
-        return min_x + np.argmin(col_sums_gray)
 
     def perform_capture(self):
         if not self.capture_area_dict:
@@ -1811,6 +1979,7 @@ class MainWindow(QMainWindow):
         reply = QMessageBox.question(self, '초기화 확인', '모든 캡처 데이터를 삭제하고 초기화하시겠습니까?',
                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
+            self.scroll_buffer = None
             self.stop_capture()
             self.captured_files = []
             self.list_widget.clear()
