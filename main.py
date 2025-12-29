@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QSplitter, QFrame, QStackedWidget, QScrollArea, 
                              QFormLayout, QAbstractItemView, QListWidgetItem, QSlider,
                              QComboBox, QDialog, QCheckBox, QSizePolicy, QBoxLayout)
-from PyQt5.QtCore import Qt, pyqtSignal, QRect, QSize, QPoint, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal, QRect, QSize, QPoint, QTimer, QEvent
 from PyQt5.QtGui import QPainter, QColor, QPen, QImage, QPixmap, QFont, QFontDatabase
 
 from skimage.metrics import structural_similarity as compare_ssim
@@ -562,21 +562,17 @@ class SlicerCanvas(QWidget):
         self.cut_points = sorted(list(set(points)))
         self.update()
 
-    def wheelEvent(self, event):
-        if event.modifiers() & Qt.ControlModifier:
-            if event.angleDelta().y() > 0:
-                self.scale_factor *= 1.1
-            else:
-                self.scale_factor /= 1.1
-            
-            self.scale_factor = max(0.1, min(self.scale_factor, 5.0))
-            
-            new_size = self.pixmap.size() * self.scale_factor
-            self.setFixedSize(new_size)
-            self.update()
-            event.accept()
+    def perform_zoom(self, delta_y):
+        if delta_y > 0:
+            self.scale_factor *= 1.1
         else:
-            event.ignore()
+            self.scale_factor /= 1.1
+        
+        self.scale_factor = max(0.1, min(self.scale_factor, 5.0))
+        
+        new_size = self.pixmap.size() * self.scale_factor
+        self.setFixedSize(new_size)
+        self.update()
 
     def mouseMoveEvent(self, event):
         self.hover_x = int(event.pos().x() / self.scale_factor)
@@ -641,6 +637,7 @@ class ScrollSlicerDialog(QDialog):
         
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.scroll.setAlignment(Qt.AlignCenter)
         
         self.pixmap = cv2_to_qpixmap(image)
@@ -648,6 +645,9 @@ class ScrollSlicerDialog(QDialog):
         self.scroll.setWidget(self.canvas)
         layout.addWidget(self.scroll)
         
+        self.scroll.installEventFilter(self)
+        self.scroll.viewport().installEventFilter(self)
+
         btn_layout = QHBoxLayout()
         
         btn_auto = QPushButton("자동 감지 실행")
@@ -683,6 +683,18 @@ class ScrollSlicerDialog(QDialog):
         self.canvas.point_removed.connect(lambda _: self.update_slice_count())
         
         QTimer.singleShot(100, self.run_auto_detect)
+
+    def eventFilter(self, source, event):
+        if event.type() == QEvent.Wheel:
+            if event.modifiers() & Qt.ControlModifier:
+                self.canvas.perform_zoom(event.angleDelta().y())
+                return True
+            else:
+                self.scroll.horizontalScrollBar().setValue(
+                    self.scroll.horizontalScrollBar().value() - event.angleDelta().y()
+                )
+                return True
+        return super().eventFilter(source, event)
 
     def clear_all_points(self):
         self.canvas.set_cut_points([])
