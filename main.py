@@ -2,6 +2,7 @@ import sys
 import os
 import re
 import time
+import qrcode
 import numpy as np
 import cv2
 import imagehash
@@ -887,12 +888,18 @@ class ScoreEditorWidget(QWidget):
         self.composer_edit = QLineEdit()
         self.composer_edit.setPlaceholderText("아티스트")
         self.composer_edit.setMinimumHeight(30)
+
+        self.url_edit = QLineEdit()
+        self.url_edit.setPlaceholderText("URL (QR코드, 예: 유튜브 링크)")
+        self.url_edit.setMinimumHeight(30)
         
         self.title_edit.textChanged.connect(self.trigger_refresh)
         self.composer_edit.textChanged.connect(self.trigger_refresh)
+        self.url_edit.textChanged.connect(self.trigger_refresh)
         
         form_layout.addRow("제목:", self.title_edit)
         form_layout.addRow("아티스트:", self.composer_edit)
+        form_layout.addRow("URL (QR):", self.url_edit)
         info_group.setLayout(form_layout)
         settings_layout.addWidget(info_group)
         
@@ -987,6 +994,7 @@ class ScoreEditorWidget(QWidget):
         self.btn_save.clicked.connect(lambda: self.save_requested.emit({
             'title': self.title_edit.text(),
             'composer': self.composer_edit.text(),
+            'url': self.url_edit.text(),
             'margin': self.margin_edit.text(),
             'spacing': self.spacing_edit.text(),
             'page_num_pos': self.page_num_pos.currentText(),
@@ -1005,6 +1013,7 @@ class ScoreEditorWidget(QWidget):
     def reset_fields(self):
         self.title_edit.clear()
         self.composer_edit.clear()
+        self.url_edit.clear()
         self.margin_edit.setText("60")
         self.spacing_edit.setText("40")
         self.page_num_pos.setCurrentIndex(0)
@@ -1084,6 +1093,7 @@ class ScoreEditorWidget(QWidget):
             
             title = self.title_edit.text().strip()
             composer = self.composer_edit.text().strip()
+            url = self.url_edit.text().strip()
             
             current_page_num = 1
             
@@ -1110,6 +1120,39 @@ class ScoreEditorWidget(QWidget):
 
             # 헤더 (제목/작곡가) 처리 - 절대 좌표 사용
             header_offset = 0
+            qr_height_val = 0
+
+            # QR 코드 생성 및 배치
+            if url and qrcode:
+                try:
+                    qr = qrcode.QRCode(box_size=10, border=2)
+                    qr.add_data(url)
+                    qr.make(fit=True)
+                    qr_img = qr.make_image(fill_color="black", back_color="white")
+                    
+                    # QPixmap 변환
+                    data = qr_img.convert("RGBA").tobytes("raw", "RGBA")
+                    qim = QImage(data, qr_img.size[0], qr_img.size[1], QImage.Format_RGBA8888)
+                    qr_pix = QPixmap.fromImage(qim)
+                    
+                    # 크기 조정 (페이지 폭의 12%)
+                    qr_size = int(base_width * 0.12)
+                    qr_pix = qr_pix.scaled(qr_size, qr_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    
+                    lbl_qr = QLabel(current_page_widget)
+                    lbl_qr.setPixmap(qr_pix)
+                    lbl_qr.setScaledContents(True)
+                    
+                    # 위치: 좌측 상단 (여백 위치)
+                    display_qr_size = int(qr_size * scale)
+                    lbl_qr.setFixedSize(display_qr_size, display_qr_size)
+                    lbl_qr.move(int(margin * scale), int(margin * scale))
+                    lbl_qr.show()
+                    
+                    qr_height_val = qr_size
+                except Exception as e:
+                    print(f"QR Error: {e}")
+
             if title or composer:
                 if title:
                     lbl_title = QLabel(title, current_page_widget)
@@ -1147,7 +1190,11 @@ class ScoreEditorWidget(QWidget):
                     
                     header_offset += (c_h / scale) + (20 * enhance_ratio)
                 
-                current_y += header_offset + (60 * enhance_ratio)
+            # 헤더 높이 결정 (텍스트와 QR 중 더 큰 것 기준)
+            final_header_height = max(header_offset, qr_height_val)
+            
+            if final_header_height > 0:
+                current_y += final_header_height + (60 * enhance_ratio)
 
             # 이미지 배치
             content_width_pdf = base_width - (margin * 2)
@@ -2129,6 +2176,7 @@ class MainWindow(QMainWindow):
         # 파일 이름 생성 로직
         title = metadata.get('title', '').strip()
         composer = metadata.get('composer', '').strip()
+        url = metadata.get('url', '').strip()
         
         if title or composer:
             if title and composer:
@@ -2211,6 +2259,22 @@ class MainWindow(QMainWindow):
             
             current_y = margin
 
+            qr_height_val = 0
+            if url and qrcode:
+                try:
+                    qr = qrcode.QRCode(box_size=10, border=2)
+                    qr.add_data(url)
+                    qr.make(fit=True)
+                    qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+                    
+                    qr_size = int(base_width * 0.12)
+                    qr_img = qr_img.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
+                    
+                    current_page.paste(qr_img, (margin, margin))
+                    qr_height_val = qr_size
+                except Exception as e:
+                    print(f"PDF QR Error: {e}")
+
             # 제목/작곡가 추가 (첫 페이지)
             title = metadata.get('title', '').strip()
             composer = metadata.get('composer', '').strip()
@@ -2231,7 +2295,9 @@ class MainWindow(QMainWindow):
                     draw.text((base_width - margin - cw, current_y + header_offset), composer, fill="black", font=comp_font)
                     header_offset += ch + (20 * enhance_ratio)
                 
-                current_y += header_offset + (100 * enhance_ratio)
+            final_header_height = max(header_offset, qr_height_val)
+            if final_header_height > 0:
+                current_y += final_header_height + (100 * enhance_ratio)
 
             for img in image_objects:
                 if img.width != content_width:
