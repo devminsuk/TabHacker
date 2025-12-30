@@ -29,6 +29,27 @@ FONT_DIR = os.path.join(BASE_DIR, "fonts")
 FONT_BOLD_PATH = os.path.join(FONT_DIR, "NotoSansKR-Bold.ttf")
 FONT_REGULAR_PATH = os.path.join(FONT_DIR, "NotoSansKR-Regular.ttf")
 
+def imread_unicode(path):
+    """한글 경로 지원 이미지 읽기"""
+    try:
+        stream = np.fromfile(path, np.uint8)
+        return cv2.imdecode(stream, cv2.IMREAD_COLOR)
+    except Exception:
+        return None
+
+def imwrite_unicode(path, img):
+    """한글 경로 지원 이미지 쓰기"""
+    try:
+        ext = os.path.splitext(path)[1]
+        result, n = cv2.imencode(ext, img)
+        if result:
+            with open(path, mode='wb') as f:
+                n.tofile(f)
+            return True
+        return False
+    except Exception:
+        return False
+
 # --- 프로페셔널 스타일시트 ---
 MODERN_STYLESHEET = """
 /* 메인 윈도우 및 다이얼로그 (다크모드 대응) */
@@ -785,7 +806,7 @@ class DraggableScrollArea(QScrollArea):
 
     def set_image(self, image_path, enhance=False, invert=False):
         if enhance or invert:
-            img = cv2.imread(image_path)
+            img = imread_unicode(image_path)
             if img is not None:
                 if enhance:
                     img = enhance_score_image(img)
@@ -1104,7 +1125,7 @@ class ScoreEditorWidget(QWidget):
 
             # 첫 번째 이미지로 기준 너비 설정 (PDF 생성 로직과 동일하게)
             # 화질 개선 여부에 따라 기준 너비가 달라짐
-            first_img_cv = cv2.imread(file_paths[0])
+            first_img_cv = imread_unicode(file_paths[0])
             if first_img_cv is None: return
             
             if self.chk_enhance.isChecked():
@@ -1269,7 +1290,7 @@ class ScoreEditorWidget(QWidget):
                     continue
                 
                 # OpenCV로 로드하여 처리 후 QPixmap 변환
-                img_cv = cv2.imread(path)
+                img_cv = imread_unicode(path)
                 if img_cv is None: continue
                 
                 if self.chk_enhance.isChecked():
@@ -1462,7 +1483,7 @@ class CaptureWorker(QObject):
             if self.last_hash is None or (curr_hash - self.last_hash > 5):
                 self.capture_counter += 1
                 filename = os.path.join(OUTPUT_FOLDER, f"score_{self.capture_counter:03d}.png")
-                cv2.imwrite(filename, img_bgr)
+                imwrite_unicode(filename, img_bgr)
                 
                 # 다음 비교를 위해 크롭된 그레이스케일 저장
                 h, w = img_bgr.shape[:2]
@@ -2035,7 +2056,7 @@ class MainWindow(QMainWindow):
         """이미지를 저장하고 리스트에 추가하는 내부 함수"""
         self.capture_counter += 1
         filename = os.path.join(OUTPUT_FOLDER, f"score_scroll_{self.capture_counter:03d}.png")
-        cv2.imwrite(filename, img)
+        imwrite_unicode(filename, img)
         self.captured_files.append(filename)
         
         item = QListWidgetItem(os.path.basename(filename))
@@ -2344,7 +2365,7 @@ class MainWindow(QMainWindow):
             for f in files:
                 if do_enhance:
                     # OpenCV로 로드 -> 처리 -> PIL 변환
-                    cv_img = cv2.imread(f)
+                    cv_img = imread_unicode(f)
                     if cv_img is not None:
                         processed = enhance_score_image(cv_img)
                         if do_invert:
