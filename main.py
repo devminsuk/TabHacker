@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QSplitter, QFrame, QStackedWidget, QScrollArea, 
                              QFormLayout, QAbstractItemView, QListWidgetItem, QSlider,
                              QComboBox, QDialog, QCheckBox, QSizePolicy, QBoxLayout)
-from PyQt5.QtCore import Qt, pyqtSignal, QRect, QSize, QPoint, QTimer, QEvent
+from PyQt5.QtCore import Qt, pyqtSignal, QRect, QSize, QPoint, QTimer, QEvent, QThread, QObject
 from PyQt5.QtGui import QPainter, QColor, QPen, QImage, QPixmap, QFont, QFontDatabase
 
 from skimage.metrics import structural_similarity as compare_ssim
@@ -1222,7 +1222,123 @@ class ScoreEditorWidget(QWidget):
         except Exception as e:
             print(f"Preview error: {e}")
 
+class CaptureWorker(QObject):
+    """캡처 및 이미지 처리를 담당하는 워커 스레드"""
+    finished_processing = pyqtSignal()
+    request_clean_capture = pyqtSignal()
+    image_saved = pyqtSignal(str, object)  # filename, img_bgr
+    scroll_updated = pyqtSignal(object)    # img_bgr
+    status_updated = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.last_captured_gray = None
+        self.last_hash = None
+        self.scroll_buffer = None
+        self.capture_counter = 0
+
+    def reset_state(self):
+        self.last_captured_gray = None
+        self.last_hash = None
+        self.scroll_buffer = None
+        self.capture_counter = 0
+
+    def process_frame(self, img_bgr, mode_index, sensitivity):
+        try:
+            if mode_index == 0:  # 페이지 넘김 모드
+                # 테두리 크롭 (비교 정확도 향상)
+                h, w = img_bgr.shape[:2]
+                border_crop = 5
+                if w > 2 * border_crop and h > 2 * border_crop:
+                    img_proc = img_bgr[border_crop:-border_crop, border_crop:-border_crop]
+                else:
+                    img_proc = img_bgr
+
+                img_gray = cv2.cvtColor(img_proc, cv2.COLOR_BGR2GRAY)
+                should_save = False
+
+                if self.last_captured_gray is None:
+                    should_save = True
+                else:
+                    if self.last_captured_gray.shape == img_gray.shape:
+                        score, _ = compare_ssim(self.last_captured_gray, img_gray, full=True)
+                        if score < sensitivity:
+                            should_save = True
+                    else:
+                        should_save = True
+
+                if should_save:
+                    self.request_clean_capture.emit()
+                    # 저장 완료될 때까지 finished_processing을 보내지 않음 (Main에서 save_clean 호출 대기)
+                else:
+                    self.finished_processing.emit()
+
+            else:  # 스크롤 모드
+                if self.scroll_buffer is None:
+                    self.scroll_buffer = img_bgr
+                    self.status_updated.emit("스크롤 캡처 시작 (버퍼링...)")
+                    self.scroll_updated.emit(self.scroll_buffer)
+                else:
+                    # 템플릿 매칭
+                    template_width = 200
+                    if self.scroll_buffer.shape[1] >= template_width and img_bgr.shape[1] >= template_width:
+                        template = self.scroll_buffer[:, -template_width:]
+                        template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+                        img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+
+                        res = cv2.matchTemplate(img_gray, template_gray, cv2.TM_CCOEFF_NORMED)
+                        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+
+                        if max_val > 0.7:
+                            match_x = max_loc[0]
+                            new_part_start = match_x + template_width
+                            if new_part_start < img_bgr.shape[1]:
+                                new_part = img_bgr[:, new_part_start:]
+                                if new_part.shape[1] > 0:
+                                    self.scroll_buffer = np.hstack((self.scroll_buffer, new_part))
+                                    self.status_updated.emit(f"이어붙이기 중... (전체 폭: {self.scroll_buffer.shape[1]}px)")
+                                    self.scroll_updated.emit(self.scroll_buffer)
+                
+                self.finished_processing.emit()
+        except Exception as e:
+            print(f"Worker Error: {e}")
+            self.finished_processing.emit()
+
+    def save_clean_image(self, img_bgr):
+        try:
+            # 해시 비교 (중복 저장 방지)
+            pil_img = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
+            curr_hash = imagehash.phash(pil_img)
+
+            if self.last_hash is None or (curr_hash - self.last_hash > 5):
+                self.capture_counter += 1
+                filename = os.path.join(OUTPUT_FOLDER, f"score_{self.capture_counter:03d}.png")
+                cv2.imwrite(filename, img_bgr)
+                
+                # 다음 비교를 위해 크롭된 그레이스케일 저장
+                h, w = img_bgr.shape[:2]
+                border_crop = 5
+                if w > 2 * border_crop and h > 2 * border_crop:
+                    clean_proc = img_bgr[border_crop:-border_crop, border_crop:-border_crop]
+                else:
+                    clean_proc = img_bgr
+                
+                self.last_captured_gray = cv2.cvtColor(clean_proc, cv2.COLOR_BGR2GRAY)
+                self.last_hash = curr_hash
+                
+                self.image_saved.emit(filename, img_bgr)
+            
+        except Exception as e:
+            print(f"Save Error: {e}")
+        finally:
+            self.finished_processing.emit()
+
 class MainWindow(QMainWindow):
+    # 워커 스레드 통신용 시그널
+    sig_process_frame = pyqtSignal(object, int, float)
+    sig_save_clean = pyqtSignal(object)
+    sig_reset_worker = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Score Capture Pro - 화면 악보 자동 캡처")
@@ -1237,11 +1353,10 @@ class MainWindow(QMainWindow):
         self.capture_timer = QTimer(self)
         self.capture_timer.timeout.connect(self.perform_capture)
 
-        self.last_captured_gray = None
-        self.last_hash = None
         self.countdown_value = -1
-        self.scroll_buffer = None
+        self.current_scroll_buffer = None # UI 표시용 최신 버퍼
         self.current_scroll_filename = None
+        self.is_worker_busy = False
 
         self.font_bold_family = "Arial"
         self.font_regular_family = "Arial"
@@ -1249,6 +1364,26 @@ class MainWindow(QMainWindow):
 
         self.setup_ui()
         self.apply_stylesheet()
+        self.setup_worker()
+
+    def setup_worker(self):
+        """워커 스레드 초기화"""
+        self.worker_thread = QThread()
+        self.worker = CaptureWorker()
+        self.worker.moveToThread(self.worker_thread)
+        
+        # 시그널 연결
+        self.sig_process_frame.connect(self.worker.process_frame)
+        self.sig_save_clean.connect(self.worker.save_clean_image)
+        self.sig_reset_worker.connect(self.worker.reset_state)
+        
+        self.worker.finished_processing.connect(self.on_worker_finished)
+        self.worker.request_clean_capture.connect(self.on_request_clean_capture)
+        self.worker.image_saved.connect(self.on_image_saved)
+        self.worker.scroll_updated.connect(self.on_scroll_updated)
+        self.worker.status_updated.connect(self.status_label.setText)
+        
+        self.worker_thread.start()
 
     def load_fonts(self):
         """폰트 파일 로드"""
@@ -1685,10 +1820,9 @@ class MainWindow(QMainWindow):
         self.image_preview_label.setText("캡처 진행 중...")
         self.current_original_pixmap = None
         self.update_mini_preview()
-        self.last_captured_gray = None
-        self.last_hash = None
-        self.scroll_buffer = None
+        self.current_scroll_buffer = None
         self.current_scroll_filename = None
+        self.sig_reset_worker.emit()
         
         if not os.path.exists(OUTPUT_FOLDER):
             os.makedirs(OUTPUT_FOLDER)
@@ -1726,11 +1860,11 @@ class MainWindow(QMainWindow):
             self.area_indicator.set_color(QColor(0, 255, 0)) # 초록색 (대기 중)
         
         # 스크롤 모드: 캡처 종료 시 일괄 자르기 수행
-        if self.mode_combo.currentIndex() == 1 and self.scroll_buffer is not None:
+        if self.mode_combo.currentIndex() == 1 and self.current_scroll_buffer is not None:
             self.status_label.setText("편집 창을 여는 중...")
             QApplication.processEvents()
             
-            dlg = ScrollSlicerDialog(self.scroll_buffer, self.capture_area_dict['width'], self)
+            dlg = ScrollSlicerDialog(self.current_scroll_buffer, self.capture_area_dict['width'], self)
             if dlg.exec_() == QDialog.Accepted:
                 sliced_images = dlg.get_sliced_images()
                 for img in sliced_images:
@@ -1739,7 +1873,7 @@ class MainWindow(QMainWindow):
             else:
                 self.status_label.setText("스크롤 캡처 취소됨")
             
-            self.scroll_buffer = None
+            self.current_scroll_buffer = None
 
         self.btn_select.setEnabled(True)
         self.btn_pdf.setEnabled(len(self.captured_files) > 0)
@@ -1761,9 +1895,10 @@ class MainWindow(QMainWindow):
         self.display_image(filename)
 
     def perform_capture(self):
-        if not self.capture_area_dict:
+        if not self.capture_area_dict or self.is_worker_busy:
             return
         
+        self.is_worker_busy = True
         # 캡처 영역 크기 가져오기
         w, h = self.capture_area_dict['width'], self.capture_area_dict['height']
             
@@ -1785,113 +1920,67 @@ class MainWindow(QMainWindow):
             if is_scroll_mode and self.area_indicator:
                 self.area_indicator.show()
 
+            # QPixmap -> OpenCV 변환 (Main Thread)
             img_bgr = qpixmap_to_cv(pixmap)
             
-            # 테두리 영역 제외 (비교 시 오작동 방지 및 스크롤 모드에서 초록색 선 제거용)
-            if is_scroll_mode:
-                img_proc = img_bgr
-            else:
-                border_crop = 5
-                if w > 2 * border_crop and h > 2 * border_crop:
-                    img_proc = img_bgr[border_crop:-border_crop, border_crop:-border_crop]
-                else:
-                    img_proc = img_bgr
+            # 워커 스레드로 처리 위임
+            mode = self.mode_combo.currentIndex()
+            sensitivity = float(self.sensitivity_input.text())
+            self.sig_process_frame.emit(img_bgr, mode, sensitivity)
             
-            # 모드에 따른 분기
-            if self.mode_combo.currentIndex() == 0:
-                # --- 페이지 넘김 모드 (기존 로직) ---
-                img_gray = cv2.cvtColor(img_proc, cv2.COLOR_BGR2GRAY)
-                should_save = False
-                threshold = float(self.sensitivity_input.text())
-                
-                if self.last_captured_gray is None:
-                    should_save = True
-                else:
-                    if self.last_captured_gray.shape == img_gray.shape:
-                        score, _ = compare_ssim(self.last_captured_gray, img_gray, full=True)
-                        if score < threshold:
-                            should_save = True
-                    else:
-                        should_save = True
-
-                if should_save:
-                    # [페이지 모드] 저장 시점: 테두리를 숨기고 깨끗한 전체 이미지를 다시 캡처 (셔터 효과 발생)
-                    if self.area_indicator:
-                        self.area_indicator.hide()
-                        QApplication.processEvents()
-                        time.sleep(0.1)
-
-                    pixmap_clean = screen.grabWindow(0, self.capture_area_dict['left'], self.capture_area_dict['top'], w, h)
-                    
-                    if self.area_indicator:
-                        self.area_indicator.show()
-                    
-                    img_bgr_clean = qpixmap_to_cv(pixmap_clean)
-
-                    pil_img = Image.fromarray(cv2.cvtColor(img_bgr_clean, cv2.COLOR_BGR2RGB))
-                    curr_hash = imagehash.phash(pil_img)
-                    
-                    if self.last_hash is None or (curr_hash - self.last_hash > 5):
-                        self.capture_counter += 1
-                        filename = os.path.join(OUTPUT_FOLDER, f"score_{self.capture_counter:03d}.png")
-                        cv2.imwrite(filename, img_bgr_clean)
-                        self.captured_files.append(filename)
-                        
-                        item = QListWidgetItem(os.path.basename(filename))
-                        item.setData(Qt.UserRole, filename)
-                        self.list_widget.addItem(item)
-                        self.list_widget.scrollToBottom()
-                        
-                        self.display_image(filename)
-                        self.btn_pdf.setEnabled(True)
-
-                        # 다음 비교를 위해 저장된 이미지의 크롭 버전 저장
-                        if w > 2 * border_crop and h > 2 * border_crop:
-                            clean_proc = img_bgr_clean[border_crop:-border_crop, border_crop:-border_crop]
-                        else:
-                            clean_proc = img_bgr_clean
-                        
-                        self.last_captured_gray = cv2.cvtColor(clean_proc, cv2.COLOR_BGR2GRAY)
-                        self.last_hash = curr_hash
-                        
-                        count = len(self.captured_files)
-                        self.status_label.setText(f"캡처 완료 (총 {count}개)")
-            else:
-                # --- 가로 스크롤 모드 (이어붙이기) --- 
-                img_bgr_scroll = img_proc 
-                if self.scroll_buffer is None:
-                    self.scroll_buffer = img_bgr_scroll
-                    # 첫 프레임은 버퍼링만 함
-                    self.status_label.setText("스크롤 캡처 시작 (버퍼링...)")
-                    self.display_cv_image(self.scroll_buffer)
-                else:
-                    # 템플릿 매칭으로 겹치는 부분 찾기
-                    template_width = 200
-                    if self.scroll_buffer.shape[1] >= template_width and img_bgr_scroll.shape[1] >= template_width:
-                        template = self.scroll_buffer[:, -template_width:]
-                        template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-                        img_gray = cv2.cvtColor(img_bgr_scroll, cv2.COLOR_BGR2GRAY)
-                        
-                        res = cv2.matchTemplate(img_gray, template_gray, cv2.TM_CCOEFF_NORMED)
-                        _, max_val, _, max_loc = cv2.minMaxLoc(res)
-                        
-                        if max_val > 0.7: # 임계값
-                            match_x = max_loc[0]
-                            new_part_start = match_x + template_width
-                            
-                            if new_part_start < img_bgr_scroll.shape[1]:
-                                new_part = img_bgr_scroll[:, new_part_start:]
-                                if new_part.shape[1] > 0:
-                                    self.scroll_buffer = np.hstack((self.scroll_buffer, new_part))
-                                    self.status_label.setText(f"이어붙이기 중... (전체 폭: {self.scroll_buffer.shape[1]}px)")
-                                    
-                                    # 미리보기: 전체 이미지가 아닌 최근 캡처 영역만큼만 표시
-                                    display_w = min(self.scroll_buffer.shape[1], w)
-                                    self.display_cv_image(self.scroll_buffer[:, -display_w:])
-                    
         except Exception as e:
             print(f"Capture Error: {e}")
             self.status_label.setText(f"캡처 오류")
+            self.is_worker_busy = False
+
+    def on_worker_finished(self):
+        """워커 처리 완료 시 호출"""
+        self.is_worker_busy = False
+
+    def on_request_clean_capture(self):
+        """페이지 모드: 변화 감지 시 깨끗한 이미지 캡처 요청"""
+        if not self.capture_area_dict:
+            self.is_worker_busy = False
+            return
+
+        # 인디케이터 숨기고 캡처
+        if self.area_indicator:
+            self.area_indicator.hide()
+            QApplication.processEvents()
+            time.sleep(0.1)
+
+        screen = QApplication.primaryScreen()
+        pixmap_clean = screen.grabWindow(0, self.capture_area_dict['left'], self.capture_area_dict['top'], 
+                                       self.capture_area_dict['width'], self.capture_area_dict['height'])
+        
+        if self.area_indicator:
+            self.area_indicator.show()
+        
+        img_bgr_clean = qpixmap_to_cv(pixmap_clean)
+        self.sig_save_clean.emit(img_bgr_clean)
+
+    def on_image_saved(self, filename, img_bgr):
+        """이미지 저장 완료 후 UI 업데이트"""
+        self.captured_files.append(filename)
+        item = QListWidgetItem(os.path.basename(filename))
+        item.setData(Qt.UserRole, filename)
+        self.list_widget.addItem(item)
+        self.list_widget.scrollToBottom()
+        
+        self.display_image(filename)
+        self.btn_pdf.setEnabled(True)
+        
+        count = len(self.captured_files)
+        self.status_label.setText(f"캡처 완료 (총 {count}개)")
+
+    def on_scroll_updated(self, scroll_buffer):
+        """스크롤 모드: 버퍼 업데이트 시 미리보기 갱신"""
+        self.current_scroll_buffer = scroll_buffer
+        # 미리보기: 전체 이미지가 아닌 최근 캡처 영역만큼만 표시
+        if self.capture_area_dict:
+            w = self.capture_area_dict['width']
+            display_w = min(scroll_buffer.shape[1], w)
+            self.display_cv_image(scroll_buffer[:, -display_w:])
 
     def show_image_preview(self, item):
         # UserRole에서 경로 가져오기
@@ -1991,16 +2080,14 @@ class MainWindow(QMainWindow):
         reply = QMessageBox.question(self, '초기화 확인', '모든 캡처 데이터를 삭제하고 초기화하시겠습니까?',
                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
-            self.scroll_buffer = None
+            self.current_scroll_buffer = None
             self.stop_capture()
             self.captured_files = []
             self.list_widget.clear()
             self.image_preview_label.clear()
             self.image_preview_label.setText("영역을 선택하고 캡처를 시작하세요.\n캡처된 이미지가 여기에 표시됩니다.")
             self.current_original_pixmap = None
-            self.last_captured_gray = None
-            self.last_hash = None
-            self.scroll_buffer = None
+            self.sig_reset_worker.emit()
             self.update_mini_preview()
             self.btn_pdf.setEnabled(False)
             self.switch_to_capture()
@@ -2213,6 +2300,9 @@ class MainWindow(QMainWindow):
             self.area_indicator.close()
         if hasattr(self, 'overlay') and self.overlay:
             self.overlay.close()
+        if hasattr(self, 'worker_thread'):
+            self.worker_thread.quit()
+            self.worker_thread.wait()
         super().closeEvent(event)
         QApplication.instance().quit()
 
