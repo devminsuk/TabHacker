@@ -865,8 +865,8 @@ class ScoreEditorWidget(QWidget):
         
         # 메인 레이아웃 (세로 배치)
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(20, 20, 20, 10)
+        main_layout.setSpacing(10)
 
         # --- 상단 설정 영역 (가로 배치) ---
         settings_container = QWidget()
@@ -972,16 +972,17 @@ class ScoreEditorWidget(QWidget):
 
         # --- 하단 버튼 ---
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(15)
+        btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.setSpacing(10)
         
         self.btn_cancel = QPushButton("뒤로 가기")
-        self.btn_cancel.setMinimumHeight(50)
+        self.btn_cancel.setMinimumHeight(38)
         self.btn_cancel.setCursor(Qt.PointingHandCursor)
         self.btn_cancel.clicked.connect(self.cancel_requested.emit)
         
         self.btn_save = QPushButton("저장하기")
         self.btn_save.setObjectName("captureButton")
-        self.btn_save.setMinimumHeight(50)
+        self.btn_save.setMinimumHeight(38)
         self.btn_save.setCursor(Qt.PointingHandCursor)
         self.btn_save.clicked.connect(lambda: self.save_requested.emit({
             'title': self.title_edit.text(),
