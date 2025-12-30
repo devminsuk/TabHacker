@@ -1001,6 +1001,19 @@ class ScoreEditorWidget(QWidget):
         self.font_bold = bold_family
         self.font_regular = regular_family
 
+    def reset_fields(self):
+        self.title_edit.clear()
+        self.composer_edit.clear()
+        self.margin_edit.setText("60")
+        self.spacing_edit.setText("40")
+        self.page_num_pos.setCurrentIndex(0)
+        self.chk_enhance.setChecked(False)
+        self.current_files = []
+        while self.preview_layout.count():
+            item = self.preview_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
     def show_large_image(self, path):
         if os.path.exists(path):
             enhance = self.chk_enhance.isChecked()
@@ -2090,6 +2103,7 @@ class MainWindow(QMainWindow):
             self.sig_reset_worker.emit()
             self.update_mini_preview()
             self.btn_pdf.setEnabled(False)
+            self.editor_widget.reset_fields()
             self.switch_to_capture()
             self.status_label.setText("초기화 완료")
 
