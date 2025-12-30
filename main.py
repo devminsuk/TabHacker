@@ -382,7 +382,7 @@ class SelectionOverlay(QWidget):
         painter = QPainter(self)
         
         if self.bg_pixmap:
-            painter.drawPixmap(0, 0, self.bg_pixmap)
+            painter.drawPixmap(self.rect(), self.bg_pixmap)
             
             # 배경 어둡게 처리
             painter.fillRect(self.rect(), QColor(0, 0, 0, 100))
@@ -390,8 +390,18 @@ class SelectionOverlay(QWidget):
             if self.start_pos and self.current_pos:
                 rect = QRect(self.start_pos, self.current_pos).normalized()
                 
+                # 논리 좌표(Widget) -> 물리 좌표(Pixmap) 비율 계산
+                sx = self.bg_pixmap.width() / self.width()
+                sy = self.bg_pixmap.height() / self.height()
+                
+                # 원본 이미지에서 가져올 실제 물리 좌표 영역 계산
+                source_rect = QRect(
+                    int(rect.x() * sx), int(rect.y() * sy),
+                    int(rect.width() * sx), int(rect.height() * sy)
+                )
+                
                 # 선택 영역은 원본 밝기로 그리기
-                painter.drawPixmap(rect, self.bg_pixmap, rect)
+                painter.drawPixmap(rect, self.bg_pixmap, source_rect)
                 
                 # 테두리
                 pen = QPen(QColor(0, 120, 212), 2, Qt.SolidLine)
@@ -2464,6 +2474,7 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
     app = QApplication(sys.argv)
     
     window = MainWindow()
