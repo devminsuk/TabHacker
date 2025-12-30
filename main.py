@@ -889,16 +889,22 @@ class ScoreEditorWidget(QWidget):
         self.composer_edit.setPlaceholderText("아티스트")
         self.composer_edit.setMinimumHeight(30)
 
+        self.bpm_edit = QLineEdit()
+        self.bpm_edit.setPlaceholderText("BPM (예: 120)")
+        self.bpm_edit.setMinimumHeight(30)
+
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText("URL (QR코드, 예: 유튜브 링크)")
         self.url_edit.setMinimumHeight(30)
         
         self.title_edit.textChanged.connect(self.trigger_refresh)
         self.composer_edit.textChanged.connect(self.trigger_refresh)
+        self.bpm_edit.textChanged.connect(self.trigger_refresh)
         self.url_edit.textChanged.connect(self.trigger_refresh)
         
         form_layout.addRow("제목:", self.title_edit)
         form_layout.addRow("아티스트:", self.composer_edit)
+        form_layout.addRow("BPM:", self.bpm_edit)
         form_layout.addRow("URL (QR):", self.url_edit)
         info_group.setLayout(form_layout)
         settings_layout.addWidget(info_group)
@@ -994,6 +1000,7 @@ class ScoreEditorWidget(QWidget):
         self.btn_save.clicked.connect(lambda: self.save_requested.emit({
             'title': self.title_edit.text(),
             'composer': self.composer_edit.text(),
+            'bpm': self.bpm_edit.text(),
             'url': self.url_edit.text(),
             'margin': self.margin_edit.text(),
             'spacing': self.spacing_edit.text(),
@@ -1013,6 +1020,7 @@ class ScoreEditorWidget(QWidget):
     def reset_fields(self):
         self.title_edit.clear()
         self.composer_edit.clear()
+        self.bpm_edit.clear()
         self.url_edit.clear()
         self.margin_edit.setText("60")
         self.spacing_edit.setText("40")
@@ -1093,6 +1101,7 @@ class ScoreEditorWidget(QWidget):
             
             title = self.title_edit.text().strip()
             composer = self.composer_edit.text().strip()
+            bpm = self.bpm_edit.text().strip()
             url = self.url_edit.text().strip()
             
             current_page_num = 1
@@ -1153,7 +1162,7 @@ class ScoreEditorWidget(QWidget):
                 except Exception as e:
                     print(f"QR Error: {e}")
 
-            if title or composer:
+            if title or composer or bpm:
                 if title:
                     lbl_title = QLabel(title, current_page_widget)
                     lbl_title.setAlignment(Qt.AlignCenter)
@@ -1189,6 +1198,26 @@ class ScoreEditorWidget(QWidget):
                     lbl_comp.show()
                     
                     header_offset += (c_h / scale) + (20 * enhance_ratio)
+
+                if bpm:
+                    lbl_bpm = QLabel(f"BPM: {bpm}", current_page_widget)
+                    lbl_bpm.setAlignment(Qt.AlignLeft)
+                    font = QFont(self.font_bold, int(comp_font_size/1.3), QFont.Bold)
+                    lbl_bpm.setFont(font)
+                    lbl_bpm.adjustSize()
+                    
+                    b_w = lbl_bpm.width()
+                    b_h = lbl_bpm.height()
+                    
+                    x_pos = int(margin * scale)
+                    # QR 코드가 있고 높이가 겹치면 아래로 내리기 (좌측 정렬 유지)
+                    if qr_height_val > 0 and header_offset < qr_height_val:
+                        header_offset = qr_height_val + (10 * enhance_ratio)
+
+                    y_pos = int((current_y + header_offset) * scale)
+                    lbl_bpm.move(x_pos, y_pos)
+                    lbl_bpm.show()
+                    header_offset += (b_h / scale) + (10 * enhance_ratio)
                 
             # 헤더 높이 결정 (텍스트와 QR 중 더 큰 것 기준)
             final_header_height = max(header_offset, qr_height_val)
@@ -2176,6 +2205,7 @@ class MainWindow(QMainWindow):
         # 파일 이름 생성 로직
         title = metadata.get('title', '').strip()
         composer = metadata.get('composer', '').strip()
+        bpm = metadata.get('bpm', '').strip()
         url = metadata.get('url', '').strip()
         
         if title or composer:
@@ -2278,11 +2308,13 @@ class MainWindow(QMainWindow):
             # 제목/작곡가 추가 (첫 페이지)
             title = metadata.get('title', '').strip()
             composer = metadata.get('composer', '').strip()
+            bpm = metadata.get('bpm', '').strip()
             
-            if title or composer:
+            if title or composer or bpm:
                 draw = ImageDraw.Draw(current_page)
                 title_font = get_pil_font(FONT_BOLD_PATH, int(base_width/30))
                 comp_font = get_pil_font(FONT_REGULAR_PATH, int(base_width/60))
+                bpm_font = get_pil_font(FONT_BOLD_PATH, int(base_width/60))
                 
                 header_offset = 0
                 if title:
@@ -2295,6 +2327,16 @@ class MainWindow(QMainWindow):
                     draw.text((base_width - margin - cw, current_y + header_offset), composer, fill="black", font=comp_font)
                     header_offset += ch + (20 * enhance_ratio)
                 
+                if bpm:
+                    bpm_text = f"BPM: {bpm}"
+                    bw, bh = get_text_size(draw, bpm_text, bpm_font)
+                    
+                    if qr_height_val > 0 and header_offset < qr_height_val:
+                        header_offset = qr_height_val + (10 * enhance_ratio)
+                        
+                    draw.text((margin, current_y + header_offset), bpm_text, fill="black", font=bpm_font)
+                    header_offset += bh + (10 * enhance_ratio)
+
             final_header_height = max(header_offset, qr_height_val)
             if final_header_height > 0:
                 current_y += final_header_height + (100 * enhance_ratio)
