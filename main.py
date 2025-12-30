@@ -1359,14 +1359,34 @@ class CaptureWorker(QObject):
         super().__init__()
         self.last_captured_gray = None
         self.last_hash = None
-        self.scroll_buffer = None
+        self.scroll_chunks = []
+        self.total_scroll_width = 0
         self.capture_counter = 0
 
     def reset_state(self):
         self.last_captured_gray = None
         self.last_hash = None
-        self.scroll_buffer = None
+        self.scroll_chunks = []
+        self.total_scroll_width = 0
         self.capture_counter = 0
+
+    def _get_tail(self, width):
+        """마지막 청크들로부터 지정된 너비만큼의 이미지를 구성하여 반환"""
+        if not self.scroll_chunks:
+            return None
+        current_width = 0
+        tail_chunks = []
+        for chunk in reversed(self.scroll_chunks):
+            tail_chunks.insert(0, chunk)
+            current_width += chunk.shape[1]
+            if current_width >= width:
+                break
+        if not tail_chunks:
+            return None
+        tail_img = np.hstack(tail_chunks)
+        if tail_img.shape[1] > width:
+            return tail_img[:, -width:]
+        return tail_img
 
     def process_frame(self, img_bgr, mode_index, sensitivity):
         try:
@@ -1399,15 +1419,18 @@ class CaptureWorker(QObject):
                     self.finished_processing.emit()
 
             else:  # 스크롤 모드
-                if self.scroll_buffer is None:
-                    self.scroll_buffer = img_bgr
+                if not self.scroll_chunks:
+                    self.scroll_chunks.append(img_bgr)
+                    self.total_scroll_width = img_bgr.shape[1]
                     self.status_updated.emit("스크롤 캡처 시작 (버퍼링...)")
-                    self.scroll_updated.emit(self.scroll_buffer)
+                    self.scroll_updated.emit(img_bgr)
                 else:
                     # 템플릿 매칭
                     template_width = 200
-                    if self.scroll_buffer.shape[1] >= template_width and img_bgr.shape[1] >= template_width:
-                        template = self.scroll_buffer[:, -template_width:]
+                    tail_img = self._get_tail(template_width)
+                    
+                    if tail_img is not None and tail_img.shape[1] >= template_width and img_bgr.shape[1] >= template_width:
+                        template = tail_img[:, -template_width:]
                         template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
                         img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
@@ -1420,9 +1443,10 @@ class CaptureWorker(QObject):
                             if new_part_start < img_bgr.shape[1]:
                                 new_part = img_bgr[:, new_part_start:]
                                 if new_part.shape[1] > 0:
-                                    self.scroll_buffer = np.hstack((self.scroll_buffer, new_part))
-                                    self.status_updated.emit(f"이어붙이기 중... (전체 폭: {self.scroll_buffer.shape[1]}px)")
-                                    self.scroll_updated.emit(self.scroll_buffer)
+                                    self.scroll_chunks.append(new_part)
+                                    self.total_scroll_width += new_part.shape[1]
+                                    self.status_updated.emit(f"이어붙이기 중... (전체 폭: {self.total_scroll_width}px)")
+                                    self.scroll_updated.emit(new_part)
                 
                 self.finished_processing.emit()
         except Exception as e:
@@ -1479,7 +1503,7 @@ class MainWindow(QMainWindow):
         self.capture_timer.timeout.connect(self.perform_capture)
 
         self.countdown_value = -1
-        self.current_scroll_buffer = None # UI 표시용 최신 버퍼
+        self.current_scroll_chunks = [] # UI 표시용 청크 리스트
         self.current_scroll_filename = None
         self.is_worker_busy = False
 
@@ -1945,7 +1969,7 @@ class MainWindow(QMainWindow):
         self.image_preview_label.setText("캡처 진행 중...")
         self.current_original_pixmap = None
         self.update_mini_preview()
-        self.current_scroll_buffer = None
+        self.current_scroll_chunks = []
         self.current_scroll_filename = None
         self.sig_reset_worker.emit()
         
@@ -1985,11 +2009,12 @@ class MainWindow(QMainWindow):
             self.area_indicator.set_color(QColor(0, 255, 0)) # 초록색 (대기 중)
         
         # 스크롤 모드: 캡처 종료 시 일괄 자르기 수행
-        if self.mode_combo.currentIndex() == 1 and self.current_scroll_buffer is not None:
+        if self.mode_combo.currentIndex() == 1 and self.current_scroll_chunks:
             self.status_label.setText("편집 창을 여는 중...")
             QApplication.processEvents()
             
-            dlg = ScrollSlicerDialog(self.current_scroll_buffer, self.capture_area_dict['width'], self)
+            full_img = np.hstack(self.current_scroll_chunks)
+            dlg = ScrollSlicerDialog(full_img, self.capture_area_dict['width'], self)
             if dlg.exec_() == QDialog.Accepted:
                 sliced_images = dlg.get_sliced_images()
                 for img in sliced_images:
@@ -1998,7 +2023,7 @@ class MainWindow(QMainWindow):
             else:
                 self.status_label.setText("스크롤 캡처 취소됨")
             
-            self.current_scroll_buffer = None
+            self.current_scroll_chunks = []
 
         self.btn_select.setEnabled(True)
         self.btn_pdf.setEnabled(len(self.captured_files) > 0)
@@ -2098,14 +2123,24 @@ class MainWindow(QMainWindow):
         count = len(self.captured_files)
         self.status_label.setText(f"캡처 완료 (총 {count}개)")
 
-    def on_scroll_updated(self, scroll_buffer):
+    def on_scroll_updated(self, new_part):
         """스크롤 모드: 버퍼 업데이트 시 미리보기 갱신"""
-        self.current_scroll_buffer = scroll_buffer
+        self.current_scroll_chunks.append(new_part)
         # 미리보기: 전체 이미지가 아닌 최근 캡처 영역만큼만 표시
         if self.capture_area_dict:
             w = self.capture_area_dict['width']
-            display_w = min(scroll_buffer.shape[1], w)
-            self.display_cv_image(scroll_buffer[:, -display_w:])
+            current_w = 0
+            tail_parts = []
+            for part in reversed(self.current_scroll_chunks):
+                tail_parts.insert(0, part)
+                current_w += part.shape[1]
+                if current_w >= w:
+                    break
+            if tail_parts:
+                preview_img = np.hstack(tail_parts)
+                if preview_img.shape[1] > w:
+                    preview_img = preview_img[:, -w:]
+                self.display_cv_image(preview_img)
 
     def show_image_preview(self, item):
         # UserRole에서 경로 가져오기
@@ -2205,7 +2240,7 @@ class MainWindow(QMainWindow):
         reply = QMessageBox.question(self, '초기화 확인', '모든 캡처 데이터를 삭제하고 초기화하시겠습니까?',
                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
-            self.current_scroll_buffer = None
+            self.current_scroll_chunks = []
             self.stop_capture()
             self.captured_files = []
             self.list_widget.clear()
