@@ -783,12 +783,15 @@ class DraggableScrollArea(QScrollArea):
         self.original_pixmap = None
         self.label = None
 
-    def set_image(self, image_path, enhance=False):
-        if enhance:
+    def set_image(self, image_path, enhance=False, invert=False):
+        if enhance or invert:
             img = cv2.imread(image_path)
             if img is not None:
-                processed = enhance_score_image(img)
-                self.original_pixmap = cv2_to_qpixmap(processed)
+                if enhance:
+                    img = enhance_score_image(img)
+                if invert:
+                    img = cv2.bitwise_not(img)
+                self.original_pixmap = cv2_to_qpixmap(img)
             else:
                 self.original_pixmap = QPixmap()
         else:
@@ -843,7 +846,7 @@ class DraggableScrollArea(QScrollArea):
         super().mouseReleaseEvent(event)
 
 class ImageDetailDialog(QDialog):
-    def __init__(self, image_path, enhance=False, parent=None):
+    def __init__(self, image_path, enhance=False, invert=False, parent=None):
         super().__init__(parent)
         self.setWindowTitle("이미지 상세 보기 (드래그:이동, 휠:확대/축소)")
         self.resize(1000, 800)
@@ -851,7 +854,7 @@ class ImageDetailDialog(QDialog):
         layout = QVBoxLayout(self)
         
         scroll = DraggableScrollArea()
-        scroll.set_image(image_path, enhance)
+        scroll.set_image(image_path, enhance, invert)
         layout.addWidget(scroll)
         
         btn_close = QPushButton("닫기")
@@ -1055,7 +1058,8 @@ class ScoreEditorWidget(QWidget):
     def show_large_image(self, path):
         if os.path.exists(path):
             enhance = self.chk_enhance.isChecked()
-            dlg = ImageDetailDialog(path, enhance, self)
+            invert = self.chk_invert.isChecked()
+            dlg = ImageDetailDialog(path, enhance, invert, self)
             dlg.exec_()
 
     def trigger_refresh(self):
