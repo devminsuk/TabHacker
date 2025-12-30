@@ -6,7 +6,7 @@ import qrcode
 import numpy as np
 import cv2
 import imagehash
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 # --- PyQt5 라이브러리 ---
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
@@ -926,11 +926,19 @@ class ScoreEditorWidget(QWidget):
         self.chk_enhance = QCheckBox("화질 개선 (선명하게)")
         self.chk_enhance.setChecked(False)
         self.chk_enhance.stateChanged.connect(self.refresh_preview)
+
+        self.chk_invert = QCheckBox("다크모드 (색상 반전)")
+        self.chk_invert.setChecked(False)
+        self.chk_invert.stateChanged.connect(self.refresh_preview)
+        
+        chk_layout = QHBoxLayout()
+        chk_layout.addWidget(self.chk_enhance)
+        chk_layout.addWidget(self.chk_invert)
         
         settings_form.addRow("여백 (px):", self.margin_edit)
         settings_form.addRow("간격 (px):", self.spacing_edit)
         settings_form.addRow("페이지 번호:", self.page_num_pos)
-        settings_form.addRow("옵션:", self.chk_enhance)
+        settings_form.addRow("옵션:", chk_layout)
         settings_group.setLayout(settings_form)
         settings_layout.addWidget(settings_group)
         
@@ -1005,7 +1013,8 @@ class ScoreEditorWidget(QWidget):
             'margin': self.margin_edit.text(),
             'spacing': self.spacing_edit.text(),
             'page_num_pos': self.page_num_pos.currentText(),
-            'enhance': self.chk_enhance.isChecked()
+            'enhance': self.chk_enhance.isChecked(),
+            'invert': self.chk_invert.isChecked()
         }))
         
         btn_layout.addWidget(self.btn_cancel, 1)
@@ -1026,6 +1035,7 @@ class ScoreEditorWidget(QWidget):
         self.spacing_edit.setText("40")
         self.page_num_pos.setCurrentIndex(0)
         self.chk_enhance.setChecked(False)
+        self.chk_invert.setChecked(False)
         self.current_files = []
         while self.preview_layout.count():
             item = self.preview_layout.takeAt(0)
@@ -1065,6 +1075,11 @@ class ScoreEditorWidget(QWidget):
                 margin = 60
                 spacing = 40
             page_num_pos_str = self.page_num_pos.currentText()
+
+            # 다크모드 설정
+            is_invert = self.chk_invert.isChecked()
+            bg_color_hex = "#000000" if is_invert else "#ffffff"
+            text_color_hex = "#ffffff" if is_invert else "#000000"
 
             # 화질 개선 시 여백/간격도 2배로 조정하여 비율 유지
             enhance_ratio = 1
@@ -1111,9 +1126,10 @@ class ScoreEditorWidget(QWidget):
                 widget = QWidget()
                 widget.setFixedSize(PREVIEW_WIDTH, preview_height)
                 # 검정색 테두리 스타일
-                widget.setStyleSheet("""
-                    background-color: white; 
-                    border: 1px solid black;
+                widget.setStyleSheet(f"""
+                    background-color: {bg_color_hex}; 
+                    border: 1px solid {text_color_hex};
+                    color: {text_color_hex};
                 """)
                 
                 # 상단 식별자
@@ -1134,10 +1150,12 @@ class ScoreEditorWidget(QWidget):
             # QR 코드 생성 및 배치
             if url and qrcode:
                 try:
+                    qr_fill = "white" if is_invert else "black"
+                    qr_back = "black" if is_invert else "white"
                     qr = qrcode.QRCode(box_size=10, border=2)
                     qr.add_data(url)
                     qr.make(fit=True)
-                    qr_img = qr.make_image(fill_color="black", back_color="white")
+                    qr_img = qr.make_image(fill_color=qr_fill, back_color=qr_back)
                     
                     # QPixmap 변환
                     data = qr_img.convert("RGBA").tobytes("raw", "RGBA")
@@ -1242,6 +1260,9 @@ class ScoreEditorWidget(QWidget):
                 
                 if self.chk_enhance.isChecked():
                     img_cv = enhance_score_image(img_cv)
+                
+                if is_invert:
+                    img_cv = cv2.bitwise_not(img_cv)
                 
                 pix = cv2_to_qpixmap(img_cv)
                 
@@ -2258,6 +2279,10 @@ class MainWindow(QMainWindow):
             
             page_num_pos = metadata.get('page_num_pos', '하단 중앙')
             do_enhance = metadata.get('enhance', False)
+            do_invert = metadata.get('invert', False)
+            
+            bg_color = "black" if do_invert else "white"
+            text_fill_color = "white" if do_invert else "black"
 
             # 화질 개선 시 여백/간격도 2배로 조정하여 비율 유지
             enhance_ratio = 1
@@ -2273,9 +2298,14 @@ class MainWindow(QMainWindow):
                     cv_img = cv2.imread(f)
                     if cv_img is not None:
                         processed = enhance_score_image(cv_img)
+                        if do_invert:
+                            processed = cv2.bitwise_not(processed)
                         image_objects.append(Image.fromarray(cv2.cvtColor(processed, cv2.COLOR_BGR2RGB)))
                 else:
-                    image_objects.append(Image.open(f).convert("RGB"))
+                    img = Image.open(f).convert("RGB")
+                    if do_invert:
+                        img = ImageOps.invert(img)
+                    image_objects.append(img)
             
             base_width = image_objects[0].width
             page_height = int(base_width * (297 / 210))
@@ -2285,17 +2315,19 @@ class MainWindow(QMainWindow):
             if content_width < 100: content_width = base_width
             
             final_pages = []
-            current_page = Image.new('RGB', (base_width, page_height), 'white')
+            current_page = Image.new('RGB', (base_width, page_height), bg_color)
             
             current_y = margin
 
             qr_height_val = 0
             if url and qrcode:
                 try:
+                    qr_fill = "white" if do_invert else "black"
+                    qr_back = "black" if do_invert else "white"
                     qr = qrcode.QRCode(box_size=10, border=2)
                     qr.add_data(url)
                     qr.make(fit=True)
-                    qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+                    qr_img = qr.make_image(fill_color=qr_fill, back_color=qr_back).convert("RGB")
                     
                     qr_size = int(base_width * 0.12)
                     qr_img = qr_img.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
@@ -2319,12 +2351,12 @@ class MainWindow(QMainWindow):
                 header_offset = 0
                 if title:
                     tw, th = get_text_size(draw, title, title_font)
-                    draw.text(((base_width - tw) / 2, current_y), title, fill="black", font=title_font)
+                    draw.text(((base_width - tw) / 2, current_y), title, fill=text_fill_color, font=title_font)
                     header_offset += th + (20 * enhance_ratio)
                 
                 if composer:
                     cw, ch = get_text_size(draw, composer, comp_font)
-                    draw.text((base_width - margin - cw, current_y + header_offset), composer, fill="black", font=comp_font)
+                    draw.text((base_width - margin - cw, current_y + header_offset), composer, fill=text_fill_color, font=comp_font)
                     header_offset += ch + (20 * enhance_ratio)
                 
                 if bpm:
@@ -2334,7 +2366,7 @@ class MainWindow(QMainWindow):
                     if qr_height_val > 0 and header_offset < qr_height_val:
                         header_offset = qr_height_val + (10 * enhance_ratio)
                         
-                    draw.text((margin, current_y + header_offset), bpm_text, fill="black", font=bpm_font)
+                    draw.text((margin, current_y + header_offset), bpm_text, fill=text_fill_color, font=bpm_font)
                     header_offset += bh + (10 * enhance_ratio)
 
             final_header_height = max(header_offset, qr_height_val)
@@ -2350,7 +2382,7 @@ class MainWindow(QMainWindow):
                     
                 if current_y + new_h + margin > page_height:
                     final_pages.append(current_page)
-                    current_page = Image.new('RGB', (base_width, page_height), 'white')
+                    current_page = Image.new('RGB', (base_width, page_height), bg_color)
                     current_y = margin
                     
                 current_page.paste(img, (margin, current_y))
@@ -2377,7 +2409,7 @@ class MainWindow(QMainWindow):
                         x_pos = base_width - margin - text_w
                         y_pos = margin // 2
                         
-                    draw.text((x_pos, y_pos), text, fill="black", font=draw_font)
+                    draw.text((x_pos, y_pos), text, fill=text_fill_color, font=draw_font)
 
             if ext == ".pdf":
                 final_pages[0].save(path, save_all=True, append_images=final_pages[1:])
