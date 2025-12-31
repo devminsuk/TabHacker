@@ -1940,6 +1940,9 @@ class MainWindow(QMainWindow):
 
     def switch_to_editor(self):
         """에디터 모드로 전환"""
+        if self.is_capturing:
+            self.stop_capture()
+
         if self.btn_mini.isChecked():
             self.btn_mini.setChecked(False)
             self.toggle_mini_mode(False)
@@ -2035,12 +2038,14 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
             
             full_img = np.hstack(self.current_scroll_chunks)
+            
             dlg = ScrollSlicerDialog(full_img, self.capture_area_dict['width'], self)
             if dlg.exec_() == QDialog.Accepted:
                 sliced_images = dlg.get_sliced_images()
                 for img in sliced_images:
                     self._save_image_to_list(img)
                 self.status_label.setText(f"스크롤 캡처 완료 ({len(sliced_images)}장)")
+                self.switch_to_editor()
             else:
                 self.status_label.setText("스크롤 캡처 취소됨")
             
@@ -2162,6 +2167,8 @@ class MainWindow(QMainWindow):
                 if preview_img.shape[1] > w:
                     preview_img = preview_img[:, -w:]
                 self.display_cv_image(preview_img)
+        
+        self.btn_pdf.setEnabled(True)
 
     def show_image_preview(self, item):
         # UserRole에서 경로 가져오기
