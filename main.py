@@ -1515,6 +1515,7 @@ class MainWindow(QMainWindow):
         self.resize(1200, 700)
         self.capture_area_dict = None
         self.captured_files = []
+        self.is_saved = True
         self.capture_counter = 0
         self.is_capturing = False  # 캡처 상태 추적
         self.area_indicator = None # 선택 영역 표시 위젯
@@ -1965,6 +1966,12 @@ class MainWindow(QMainWindow):
     def toggle_capture(self):
         """캡처 시작/중지 토글"""
         if not self.is_capturing:
+            if self.captured_files:
+                reply = QMessageBox.question(self, '새 캡처 시작', 
+                                           '새로운 캡처를 시작하면 기존 캡처 데이터가 모두 삭제됩니다.\n계속하시겠습니까?',
+                                           QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if reply != QMessageBox.Yes:
+                    return
             self.start_capture()
         else:
             self.stop_capture()
@@ -2063,6 +2070,7 @@ class MainWindow(QMainWindow):
         filename = os.path.join(OUTPUT_FOLDER, f"score_scroll_{self.capture_counter:03d}.png")
         imwrite_unicode(filename, img)
         self.captured_files.append(filename)
+        self.is_saved = False
         
         item = QListWidgetItem(os.path.basename(filename))
         item.setData(Qt.UserRole, filename)
@@ -2138,6 +2146,7 @@ class MainWindow(QMainWindow):
     def on_image_saved(self, filename, img_bgr):
         """이미지 저장 완료 후 UI 업데이트"""
         self.captured_files.append(filename)
+        self.is_saved = False
         item = QListWidgetItem(os.path.basename(filename))
         item.setData(Qt.UserRole, filename)
         self.list_widget.addItem(item)
@@ -2256,10 +2265,12 @@ class MainWindow(QMainWindow):
             self.image_preview_label.setText("선택된 이미지 없음")
             self.btn_pdf.setEnabled(False)
             self.current_original_pixmap = None
+            self.is_saved = True
         else:
             last_row = self.list_widget.count() - 1
             self.list_widget.setCurrentRow(last_row)
             self.show_image_preview(self.list_widget.item(last_row))
+            self.is_saved = False
         
         self.status_label.setText(f"삭제 완료 (남은 이미지: {self.list_widget.count()}개)")
 
@@ -2271,6 +2282,7 @@ class MainWindow(QMainWindow):
             self.current_scroll_chunks = []
             self.stop_capture()
             self.captured_files = []
+            self.is_saved = True
             self.list_widget.clear()
             self.image_preview_label.clear()
             self.image_preview_label.setText("영역을 선택하고 캡처를 시작하세요.\n캡처된 이미지가 여기에 표시됩니다.")
@@ -2329,6 +2341,7 @@ class MainWindow(QMainWindow):
         )
         
         if not path:
+            self.status_label.setText("저장 취소됨")
             return
             
         # 확장자 확인 및 보정
@@ -2511,6 +2524,7 @@ class MainWindow(QMainWindow):
                 msg_title = "이미지 저장 완료"
                 msg_text = f"이미지가 저장되었습니다.\n\n저장된 파일 수: {saved_count}개"
 
+            self.is_saved = True
             self.status_label.setText(f"저장 완료")
             
             msg = QMessageBox(self)
@@ -2526,6 +2540,14 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "오류", f"파일 저장 실패:\n{e}")
 
     def closeEvent(self, event):
+        if self.captured_files and not self.is_saved:
+            reply = QMessageBox.question(self, '종료 확인', 
+                                       '저장되지 않은 캡처 데이터가 있습니다.\n정말로 종료하시겠습니까?',
+                                       QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                event.ignore()
+                return
+
         if self.is_capturing:
             self.stop_capture() 
         if self.area_indicator:
