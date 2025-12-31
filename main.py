@@ -651,7 +651,7 @@ class SlicerCanvas(QWidget):
             painter.drawLine(self.hover_x, 0, self.hover_x, h)
 
 class ScrollSlicerDialog(QDialog):
-    def __init__(self, image, target_width, parent=None):
+    def __init__(self, image, target_width, parent=None, initial_points=None):
         super().__init__(parent)
         self.setWindowTitle("스크롤 캡처 자르기 편집")
         self.resize(1200, 800)
@@ -714,7 +714,22 @@ class ScrollSlicerDialog(QDialog):
         self.canvas.point_added.connect(lambda _: self.update_slice_count())
         self.canvas.point_removed.connect(lambda _: self.update_slice_count())
         
-        QTimer.singleShot(100, self.run_auto_detect)
+        if initial_points:
+            QTimer.singleShot(100, lambda: self.ask_restore(initial_points))
+        else:
+            QTimer.singleShot(100, self.run_auto_detect)
+
+    def ask_restore(self, points):
+        reply = QMessageBox.question(
+            self, "이전 편집 복구", 
+            "이전에 편집했던 자르기 위치를 불러오시겠습니까?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+        )
+        if reply == QMessageBox.Yes:
+            self.canvas.set_cut_points(points)
+            self.update_slice_count()
+        else:
+            self.run_auto_detect()
 
     def eventFilter(self, source, event):
         if event.type() == QEvent.Wheel:
@@ -1527,6 +1542,8 @@ class MainWindow(QMainWindow):
         self.countdown_value = -1
         self.current_scroll_chunks = [] # UI 표시용 청크 리스트
         self.current_scroll_filename = None
+        self.last_stitched_image = None
+        self.last_cut_points = None
         self.is_worker_busy = False
 
         self.font_bold_family = "Arial"
@@ -1701,20 +1718,36 @@ class MainWindow(QMainWindow):
         # 버튼 레이아웃 (선택 삭제 / 전체 초기화)
         list_btn_layout = QHBoxLayout()
         
+        self.btn_reslice = QPushButton("다시 자르기")
+        self.btn_reslice.setMinimumHeight(28)
+        self.btn_reslice.clicked.connect(self.reslice_last_scroll)
+        self.btn_reslice.hide()
+        self.btn_reslice.setStyleSheet("""
+            QPushButton { background-color: #17a2b8; color: white; border: none; border-radius: 4px; padding: 0px 2px; font-size: 11px; }
+            QPushButton:hover { background-color: #138496; }
+            QPushButton:pressed { background-color: #117a8b; }
+            QPushButton:disabled { background-color: #e0e0e0; color: #a0a0a0; }
+        """)
+
         self.btn_delete = QPushButton("선택 삭제")
-        self.btn_delete.setObjectName("deleteButton")
         self.btn_delete.setMinimumHeight(28)
         self.btn_delete.clicked.connect(self.delete_selected_item)
+        self.btn_delete.setStyleSheet("""
+            QPushButton { background-color: #6c757d; color: white; border: none; border-radius: 4px; padding: 0px 2px; font-size: 11px; }
+            QPushButton:hover { background-color: #5a6268; }
+            QPushButton:pressed { background-color: #545b62; }
+        """)
         
         self.btn_reset = QPushButton("전체 초기화")
         self.btn_reset.setMinimumHeight(28)
         self.btn_reset.setStyleSheet("""
-            QPushButton { background-color: #d9534f; color: white; border: none; border-radius: 4px; }
+            QPushButton { background-color: #d9534f; color: white; border: none; border-radius: 4px; padding: 0px 2px; font-size: 11px; }
             QPushButton:hover { background-color: #c9302c; }
             QPushButton:pressed { background-color: #ac2925; }
         """)
         self.btn_reset.clicked.connect(self.reset_all)
         
+        list_btn_layout.addWidget(self.btn_reslice, 1)
         list_btn_layout.addWidget(self.btn_reset, 1)
         list_btn_layout.addWidget(self.btn_delete, 1)
         capture_layout.addLayout(list_btn_layout)
@@ -1997,6 +2030,8 @@ class MainWindow(QMainWindow):
         
         self.captured_files = []
         self.list_widget.clear()
+        self.btn_reslice.hide()
+        self.last_stitched_image = None
         self.image_preview_label.setText("캡처 진행 중...")
         self.current_original_pixmap = None
         self.update_mini_preview()
@@ -2045,9 +2080,12 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
             
             full_img = np.hstack(self.current_scroll_chunks)
+            self.last_stitched_image = full_img
+            self.btn_reslice.show()
             
             dlg = ScrollSlicerDialog(full_img, self.capture_area_dict['width'], self)
             if dlg.exec_() == QDialog.Accepted:
+                self.last_cut_points = dlg.canvas.cut_points
                 sliced_images = dlg.get_sliced_images()
                 for img in sliced_images:
                     self._save_image_to_list(img)
@@ -2077,6 +2115,54 @@ class MainWindow(QMainWindow):
         self.list_widget.addItem(item)
         self.list_widget.scrollToBottom()
         self.display_image(filename)
+
+    def reslice_last_scroll(self):
+        if self.last_stitched_image is None:
+            return
+        
+        should_clear = False
+        if self.list_widget.count() > 0:
+            reply = QMessageBox.question(
+                self, 
+                "다시 자르기", 
+                "기존 캡처 목록을 초기화하시겠습니까?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            
+            if reply == QMessageBox.No:
+                return
+            
+            should_clear = (reply == QMessageBox.Yes)
+        
+        width = self.capture_area_dict['width'] if self.capture_area_dict else self.last_stitched_image.shape[1]
+        dlg = ScrollSlicerDialog(self.last_stitched_image, width, self, initial_points=self.last_cut_points)
+        if dlg.exec_() == QDialog.Accepted:
+            self.last_cut_points = dlg.canvas.cut_points
+            # 기존 이미지 삭제 로직 수행
+            if should_clear:
+                # 디스크에서 파일 삭제
+                for i in range(self.list_widget.count()):
+                    item = self.list_widget.item(i)
+                    path = item.data(Qt.UserRole)
+                    if path and os.path.exists(path):
+                        try:
+                            os.remove(path)
+                        except: pass
+                
+                self.captured_files = []
+                self.list_widget.clear()
+                self.image_preview_label.clear()
+                self.image_preview_label.setText("영역을 선택하고 캡처를 시작하세요.\n캡처된 이미지가 여기에 표시됩니다.")
+                self.current_original_pixmap = None
+
+            sliced_images = dlg.get_sliced_images()
+            for img in sliced_images:
+                self._save_image_to_list(img)
+            
+            self.btn_pdf.setEnabled(len(self.captured_files) > 0)
+            self.status_label.setText(f"재자르기 완료 ({len(sliced_images)}장)")
+            self.switch_to_editor()
 
     def perform_capture(self):
         if not self.capture_area_dict or self.is_worker_busy:
@@ -2280,6 +2366,9 @@ class MainWindow(QMainWindow):
                                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
             self.current_scroll_chunks = []
+            self.last_stitched_image = None
+            self.last_cut_points = None
+            self.btn_reslice.hide()
             self.stop_capture()
             self.captured_files = []
             self.is_saved = True
