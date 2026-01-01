@@ -1,24 +1,9 @@
-import sys
-import os
-import re
-import time
-import qrcode
-import numpy as np
-import cv2
-import imagehash
+import sys, os, re, time, qrcode, numpy as np, cv2, imagehash
 from PIL import Image, ImageDraw, ImageFont, ImageOps
-
-# --- PyQt5 라이브러리 ---
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QPushButton, QLabel, QLineEdit,   
-                             QGroupBox, QListWidget, QMessageBox, QFileDialog,
-                             QSplitter, QFrame, QStackedWidget, QScrollArea, 
-                             QFormLayout, QAbstractItemView, QListWidgetItem, QSlider,
-                             QComboBox, QDialog, QCheckBox, QSizePolicy, QBoxLayout)
-from PyQt5.QtCore import Qt, pyqtSignal, QRect, QSize, QPoint, QTimer, QEvent, QThread, QObject
-from PyQt5.QtGui import QPainter, QColor, QPen, QImage, QPixmap, QFont, QFontDatabase
-
 from skimage.metrics import structural_similarity as compare_ssim
+from PyQt5.QtWidgets import *
+from PyQt5.QtCore import *
+from PyQt5.QtGui import *
 
 # --- 설정 ---
 OUTPUT_FOLDER = "captured_scores"
@@ -1554,6 +1539,49 @@ class MainWindow(QMainWindow):
         self.apply_stylesheet()
         self.setup_worker()
 
+    def update_ui_state(self):
+        """UI 상태(미니모드/캡처중)에 따라 버튼 스타일과 텍스트 업데이트"""
+        is_mini = self.btn_mini.isChecked()
+        is_capturing = self.is_capturing
+        
+        # 1. 캡처 버튼 설정
+        if is_mini:
+            self.btn_capture.setFixedHeight(32)
+            self.btn_capture.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            if is_capturing:
+                self.btn_capture.setText("중지")
+                self.btn_capture.setStyleSheet("font-size: 12px; font-weight: bold; border-radius: 4px; border: none; color: white; background-color: #dc3545;")
+            else:
+                self.btn_capture.setText("2. 캡처")
+                self.btn_capture.setStyleSheet("font-size: 12px; font-weight: bold; border-radius: 4px; border: none; color: white; background-color: #28a745;")
+        else:
+            self.btn_capture.setMinimumHeight(42)
+            self.btn_capture.setMaximumHeight(16777215)
+            self.btn_capture.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+            self.btn_capture.setStyleSheet("") # Reset to use global stylesheet
+            
+            if is_capturing:
+                self.btn_capture.setText("■ 캡처 중지")
+                self.btn_capture.setObjectName("captureButtonActive")
+            else:
+                self.btn_capture.setText("2. 캡처 시작")
+                self.btn_capture.setObjectName("captureButton")
+            
+            self.apply_stylesheet()
+
+        # 2. 선택 버튼 설정 (미니모드일 때만 스타일 변경)
+        if is_mini:
+            self.btn_select.setText("1. 영역")
+            self.btn_select.setFixedHeight(32)
+            self.btn_select.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.btn_select.setStyleSheet("font-size: 12px; font-weight: bold; border-radius: 4px; border: none; color: white; background-color: #6a5acd;")
+        else:
+            self.btn_select.setText("1. 영역 선택")
+            self.btn_select.setMinimumHeight(36)
+            self.btn_select.setMaximumHeight(16777215)
+            self.btn_select.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+            self.btn_select.setStyleSheet("")
+
     def setup_worker(self):
         """워커 스레드 초기화"""
         self.worker_thread = QThread()
@@ -1822,6 +1850,8 @@ class MainWindow(QMainWindow):
     def toggle_mini_mode(self, checked):
         left_panel = self.findChild(QFrame, "leftPanel")
 
+        self.buttons_layout.setDirection(QBoxLayout.LeftToRight if checked else QBoxLayout.TopToBottom)
+
         if checked:
             self.right_stack.hide()
             self.capture_group.hide()
@@ -1838,22 +1868,6 @@ class MainWindow(QMainWindow):
             self.setFixedSize(320, 460)
             self.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint | Qt.CustomizeWindowHint | 
                               Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
-            
-            self.buttons_layout.setDirection(QBoxLayout.LeftToRight)
-            
-            self.btn_select.setText("1. 영역")
-            self.btn_select.setFixedHeight(32)
-            self.btn_select.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            self.btn_select.setStyleSheet("font-size: 12px; font-weight: bold; border-radius: 4px; border: none; color: white; background-color: #6a5acd;")
-            
-            if not self.is_capturing:
-                self.btn_capture.setText("2. 캡처")
-            else:
-                self.btn_capture.setText("중지")
-            self.btn_capture.setFixedHeight(32)
-            self.btn_capture.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            bg_color = "#dc3545" if self.is_capturing else "#28a745"
-            self.btn_capture.setStyleSheet(f"font-size: 12px; font-weight: bold; border-radius: 4px; border: none; color: white; background-color: {bg_color};")
             
             self.btn_pdf.setText("3. 편집 및 저장")
             self.status_label.setFixedHeight(28)
@@ -1885,32 +1899,16 @@ class MainWindow(QMainWindow):
                 flags |= Qt.WindowStaysOnTopHint
             self.setWindowFlags(flags)
             
-            self.buttons_layout.setDirection(QBoxLayout.TopToBottom)
-            
-            self.btn_select.setText("1. 영역 선택")
-            self.btn_select.setMinimumHeight(36)
-            self.btn_select.setMaximumHeight(16777215)
-            self.btn_select.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-            self.btn_select.setStyleSheet("")
-            
-            if not self.is_capturing:
-                self.btn_capture.setText("2. 캡처 시작")
-            else:
-                self.btn_capture.setText("■ 캡처 중지")
-            self.btn_capture.setMinimumHeight(42)
-            self.btn_capture.setMaximumHeight(16777215)
-            self.btn_capture.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-            self.btn_capture.setStyleSheet("")
-            
             self.btn_pdf.setText("3. 편집 및 저장")
             self.status_label.setMinimumHeight(32)
             self.status_label.setMaximumHeight(16777215)
             self.status_label.setWordWrap(True)
             self.status_label.setStyleSheet("")
-            self.show()
-            self.raise_()
-            self.activateWindow()
-            
+
+        self.update_ui_state()
+        self.show()
+        self.raise_()
+        self.activateWindow()
         self.update_mini_preview()
 
     def toggle_always_on_top(self, state):
@@ -1951,10 +1949,7 @@ class MainWindow(QMainWindow):
         )
         
         self.btn_capture.setEnabled(True)
-        if self.btn_mini.isChecked():
-            self.btn_select.setText("1. 영역")
-        else:
-            self.btn_select.setText("1. 영역 선택")
+        self.update_ui_state()
         self.status_label.setText(f"영역 설정됨 ({area_dict['width']}×{area_dict['height']})")
         
     def on_selection_cancelled(self):
@@ -2012,15 +2007,7 @@ class MainWindow(QMainWindow):
     def start_capture(self):
         self.switch_to_capture()
         self.is_capturing = True
-        self.btn_capture.setObjectName("captureButtonActive")
-        self.btn_capture.setStyleSheet("")  # 스타일 재적용
-        self.apply_stylesheet()
-        
-        if self.btn_mini.isChecked():
-            self.btn_capture.setText("중지")
-            self.btn_capture.setStyleSheet("font-size: 12px; font-weight: bold; border-radius: 4px; border: none; color: white; background-color: #dc3545;")
-        else:
-            self.btn_capture.setText("■ 캡처 중지")
+        self.update_ui_state()
         
         if self.area_indicator:
             self.area_indicator.set_color(QColor(255, 0, 0)) # 빨간색 (녹화 중)
@@ -2060,16 +2047,7 @@ class MainWindow(QMainWindow):
     def stop_capture(self):
         self.is_capturing = False
         self.capture_timer.stop()
-        
-        self.btn_capture.setObjectName("captureButton")
-        self.btn_capture.setStyleSheet("")  # 스타일 재적용
-        self.apply_stylesheet()
-        
-        if self.btn_mini.isChecked():
-            self.btn_capture.setText("2. 캡처")
-            self.btn_capture.setStyleSheet("font-size: 12px; font-weight: bold; border-radius: 4px; border: none; color: white; background-color: #28a745;")
-        else:
-            self.btn_capture.setText("2. 캡처 시작")
+        self.update_ui_state()
         
         if self.area_indicator:
             self.area_indicator.set_color(QColor(0, 255, 0)) # 초록색 (대기 중)
