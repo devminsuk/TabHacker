@@ -327,6 +327,10 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0px;
 }
 
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+
 /* 프레임 */
 QFrame#leftPanel {
     background-color: #f5f5f5;
