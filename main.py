@@ -501,18 +501,37 @@ class ClickableLabel(QLabel):
         super().mousePressEvent(event)
 
 def enhance_score_image(img_bgr):
-    """이미지 선명화 및 이진화 처리 (스캔 품질)"""
-    # 1. 그레이스케일 변환
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    """OpenCV DNN Super Resolution을 이용한 업스케일링 (모델 없으면 Bicubic+Sharpening)"""
+    # 모델 파일이 위치할 경로 (models 폴더)
+    models_dir = os.path.join(BASE_DIR, "models")
+    model_path = os.path.join(models_dir, "LapSRN_x4.pb")
     
-    # 2. 2배 업스케일링 (Cubic Interpolation) - 선명도 확보
-    enhanced = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+    model_info = None
     
-    # 3. 적응형 이진화 (Adaptive Thresholding)
-    binary = cv2.adaptiveThreshold(
-        enhanced, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 10
-    )
-    return cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+    # EDSR_x4.pb 모델 고정 사용
+    if os.path.exists(model_path):
+        model_info = (model_path, "lapsrn", 4)
+
+    if model_info and hasattr(cv2, 'dnn_superres'):
+        try:
+            path, algo, scale = model_info
+            sr = cv2.dnn_superres.DnnSuperResImpl_create()
+            sr.readModel(path)
+            sr.setModel(algo, scale)
+            return sr.upsample(img_bgr)
+        except Exception as e:
+            print(f"DNN Upscaling error: {e}")
+
+    # Fallback: Bicubic Interpolation + Sharpening
+    upscaled = cv2.resize(img_bgr, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+    
+    # 샤프닝 커널 적용 (선명하게)
+    kernel = np.array([[0, -1, 0],
+                       [-1, 5, -1],
+                       [0, -1, 0]])
+    sharpened = cv2.filter2D(upscaled, -1, kernel)
+    
+    return sharpened
 
 def cv2_to_qpixmap(img_cv):
     """OpenCV 이미지를 QPixmap으로 변환"""
@@ -850,8 +869,13 @@ class DraggableScrollArea(QScrollArea):
         self.original_pixmap = None
         self.label = None
 
-    def set_image(self, image_path, enhance=False, invert=False):
-        if enhance or invert:
+    def set_image(self, image_path, enhance=False, invert=False, image_data=None):
+        if image_data is not None:
+            img = image_data
+            if invert:
+                img = cv2.bitwise_not(img)
+            self.original_pixmap = cv2_to_qpixmap(img)
+        elif enhance or invert:
             img = imread_unicode(image_path)
             if img is not None:
                 if enhance:
@@ -913,7 +937,7 @@ class DraggableScrollArea(QScrollArea):
         super().mouseReleaseEvent(event)
 
 class ImageDetailDialog(QDialog):
-    def __init__(self, image_path, enhance=False, invert=False, parent=None):
+    def __init__(self, image_path, enhance=False, invert=False, parent=None, image_data=None):
         super().__init__(parent)
         self.setWindowTitle("이미지 상세 보기 (드래그:이동, 휠:확대/축소)")
         self.resize(1000, 800)
@@ -921,13 +945,36 @@ class ImageDetailDialog(QDialog):
         layout = QVBoxLayout(self)
         
         scroll = DraggableScrollArea()
-        scroll.set_image(image_path, enhance, invert)
+        scroll.set_image(image_path, enhance, invert, image_data=image_data)
         layout.addWidget(scroll)
         
         btn_close = QPushButton("닫기")
         btn_close.clicked.connect(self.close)
         btn_close.setMinimumHeight(40)
         layout.addWidget(btn_close)
+
+class ImageEnhancerWorker(QObject):
+    progress = Signal(int)
+    finished = Signal(dict)
+    
+    def __init__(self, files):
+        super().__init__()
+        self.files = files
+        self.is_running = True
+
+    def run(self):
+        results = {}
+        for i, path in enumerate(self.files):
+            if not self.is_running: break
+            img = imread_unicode(path)
+            if img is not None:
+                res = enhance_score_image(img)
+                results[path] = res
+            self.progress.emit(i + 1)
+        self.finished.emit(results)
+
+    def stop(self):
+        self.is_running = False
 
 class ScoreEditorWidget(QWidget):
     """PDF 생성 전 메타데이터 입력 및 미리보기 위젯"""
@@ -937,6 +984,7 @@ class ScoreEditorWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_files = []
+        self.enhanced_cache = {}
         self.font_bold = "Arial"
         self.font_regular = "Arial"
         
@@ -1106,6 +1154,9 @@ class ScoreEditorWidget(QWidget):
         self.font_bold = bold_family
         self.font_regular = regular_family
 
+    def clear_image_cache(self):
+        self.enhanced_cache = {}
+
     def reset_fields(self):
         self.title_edit.clear()
         self.composer_edit.clear()
@@ -1117,6 +1168,7 @@ class ScoreEditorWidget(QWidget):
         self.chk_enhance.setChecked(False)
         self.chk_invert.setChecked(False)
         self.current_files = []
+        self.enhanced_cache = {}
         while self.preview_layout.count():
             item = self.preview_layout.takeAt(0)
             if item.widget():
@@ -1124,20 +1176,82 @@ class ScoreEditorWidget(QWidget):
 
     def show_large_image(self, path):
         if os.path.exists(path):
-            enhance = self.chk_enhance.isChecked()
             invert = self.chk_invert.isChecked()
-            dlg = ImageDetailDialog(path, enhance, invert, self)
+            img_data = None
+            
+            # 캐시된 고화질 이미지가 있으면 사용
+            if self.chk_enhance.isChecked() and path in self.enhanced_cache:
+                img_data = self.enhanced_cache[path]
+                # 이미 화질 개선된 데이터이므로 enhance=False로 전달
+                dlg = ImageDetailDialog(path, enhance=False, invert=invert, parent=self, image_data=img_data)
+            else:
+                # 캐시가 없으면 기존 방식대로
+                enhance = self.chk_enhance.isChecked()
+                dlg = ImageDetailDialog(path, enhance=enhance, invert=invert, parent=self)
             dlg.exec()
 
     def trigger_refresh(self):
         self.debounce_timer.start(500)
 
     def refresh_preview(self):
-        if self.current_files:
-            self.load_preview(self.current_files)
+        if self.chk_enhance.isChecked() and self.current_files:
+            uncached = [f for f in self.current_files if f not in self.enhanced_cache]
+            if uncached:
+                self.run_enhancement_worker(uncached)
+                return
+        self.render_preview_content()
+
+    def run_enhancement_worker(self, files):
+        self.progress_dlg = QProgressDialog("고화질 변환 처리 중... (시간이 걸릴 수 있습니다)", "취소", 0, len(files), self)
+        self.progress_dlg.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_dlg.setMinimumDuration(0)
+        self.progress_dlg.setAutoClose(False)
+        self.progress_dlg.setValue(0)
+        
+        self.worker_thread = QThread()
+        self.worker = ImageEnhancerWorker(files)
+        self.worker.moveToThread(self.worker_thread)
+        
+        self.worker_thread.started.connect(self.worker.run)
+        self.worker.progress.connect(self.progress_dlg.setValue)
+        self.worker.finished.connect(self.on_enhancement_finished)
+        self.worker.finished.connect(self.worker_thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.worker_thread.finished.connect(self.worker_thread.deleteLater)
+        
+        self.progress_dlg.canceled.connect(self.cancel_enhancement)
+        self.worker_thread.start()
+
+    def cancel_enhancement(self):
+        if hasattr(self, 'worker'):
+            self.worker.stop()
+        self.chk_enhance.blockSignals(True)
+        self.chk_enhance.setChecked(False)
+        self.chk_enhance.blockSignals(False)
+        self.render_preview_content()
+
+    def on_enhancement_finished(self, results):
+        self.enhanced_cache.update(results)
+        try:
+            self.progress_dlg.canceled.disconnect(self.cancel_enhancement)
+        except Exception:
+            pass
+        self.progress_dlg.close()
+        self.render_preview_content()
 
     def load_preview(self, file_paths):
         self.current_files = file_paths
+        
+        # 목록에서 제거된 파일은 캐시에서도 삭제
+        current_set = set(file_paths)
+        keys_to_remove = [k for k in self.enhanced_cache if k not in current_set]
+        for k in keys_to_remove:
+            del self.enhanced_cache[k]
+
+        self.refresh_preview()
+
+    def render_preview_content(self):
+        file_paths = self.current_files
         # 기존 위젯 제거
         while self.preview_layout.count():
             item = self.preview_layout.takeAt(0)
@@ -1335,12 +1449,20 @@ class ScoreEditorWidget(QWidget):
                 if not os.path.exists(path):
                     continue
                 
-                # OpenCV로 로드하여 처리 후 QPixmap 변환
-                img_cv = imread_unicode(path)
-                if img_cv is None: continue
-                
+                img_cv = None
                 if self.chk_enhance.isChecked():
-                    img_cv = enhance_score_image(img_cv)
+                    if path in self.enhanced_cache:
+                        img_cv = self.enhanced_cache[path]
+                    else:
+                        raw_img = imread_unicode(path)
+                        if raw_img is not None:
+                            img_cv = enhance_score_image(raw_img)
+                            self.enhanced_cache[path] = img_cv
+                
+                if img_cv is None:
+                    img_cv = imread_unicode(path)
+                    
+                if img_cv is None: continue
                 
                 if is_invert:
                     img_cv = cv2.bitwise_not(img_cv)
@@ -2080,6 +2202,7 @@ class MainWindow(QMainWindow):
         self.current_scroll_chunks = []
         self.current_scroll_filename = None
         self.sig_reset_worker.emit()
+        self.editor_widget.clear_image_cache()
         
         if not os.path.exists(OUTPUT_FOLDER):
             os.makedirs(OUTPUT_FOLDER)
@@ -2503,10 +2626,17 @@ class MainWindow(QMainWindow):
             image_objects = []
             for f in files:
                 if do_enhance:
-                    # OpenCV로 로드 -> 처리 -> PIL 변환
-                    cv_img = imread_unicode(f)
+                    # 캐시 확인
+                    if f in self.editor_widget.enhanced_cache:
+                        cv_img = self.editor_widget.enhanced_cache[f]
+                    else:
+                        cv_img = imread_unicode(f)
+                        if cv_img is not None:
+                            cv_img = enhance_score_image(cv_img)
+                            self.editor_widget.enhanced_cache[f] = cv_img
+                            
                     if cv_img is not None:
-                        processed = enhance_score_image(cv_img)
+                        processed = cv_img
                         if do_invert:
                             processed = cv2.bitwise_not(processed)
                         image_objects.append(Image.fromarray(cv2.cvtColor(processed, cv2.COLOR_BGR2RGB)))
