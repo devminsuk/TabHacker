@@ -1,6 +1,5 @@
 import sys, os, re, time, qrcode, numpy as np, cv2, imagehash
 from PIL import Image, ImageDraw, ImageFont, ImageOps
-from skimage.metrics import structural_similarity as compare_ssim
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
@@ -578,6 +577,48 @@ def qpixmap_to_cv(pixmap):
     # 패딩 제거 및 BGR 변환
     arr = arr[:, :w * 3].reshape(h, w, 3)
     return cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+
+def calculate_ssim(img1, img2):
+    """scikit-image 제거를 위한 OpenCV 기반 SSIM 계산 함수"""
+    if img1.shape != img2.shape:
+        return 0.0
+
+    # SSIM 상수 (L=255 기준)
+    C1 = 6.5025  # (0.01 * 255)^2
+    C2 = 58.5225 # (0.03 * 255)^2
+
+    img1 = img1.astype(np.float64)
+    img2 = img2.astype(np.float64)
+
+    # 커널 크기 설정 (이미지가 작을 경우 대비)
+    k_size = 11
+    min_dim = min(img1.shape[0], img1.shape[1])
+    if min_dim < k_size:
+        k_size = min_dim
+        if k_size % 2 == 0: k_size -= 1
+        if k_size < 3: k_size = 3
+
+    kernel = (k_size, k_size)
+    sigma = 1.5
+
+    mu1 = cv2.GaussianBlur(img1, kernel, sigma)
+    mu2 = cv2.GaussianBlur(img2, kernel, sigma)
+
+    mu1_sq = mu1 ** 2
+    mu2_sq = mu2 ** 2
+    mu1_mu2 = mu1 * mu2
+
+    sigma1_sq = cv2.GaussianBlur(img1 ** 2, kernel, sigma) - mu1_sq
+    sigma2_sq = cv2.GaussianBlur(img2 ** 2, kernel, sigma) - mu2_sq
+    sigma12 = cv2.GaussianBlur(img1 * img2, kernel, sigma) - mu1_mu2
+
+    t1 = 2 * mu1_mu2 + C1
+    t2 = 2 * sigma12 + C2
+    t3 = mu1_sq + mu2_sq + C1
+    t4 = sigma1_sq + sigma2_sq + C2
+
+    ssim_map = (t1 * t2) / (t3 * t4)
+    return ssim_map.mean()
 
 def get_pil_font(path, size, fallback="arial.ttf"):
     """PIL 폰트 로드 헬퍼"""
@@ -1664,7 +1705,7 @@ class CaptureWorker(QObject):
                     should_save = True
                 else:
                     if self.last_captured_gray.shape == img_gray.shape:
-                        score, _ = compare_ssim(self.last_captured_gray, img_gray, full=True)
+                        score = calculate_ssim(self.last_captured_gray, img_gray)
                         if score < sensitivity:
                             should_save = True
                     else:
