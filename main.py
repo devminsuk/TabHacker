@@ -1,9 +1,9 @@
 import sys, os, re, time, qrcode, numpy as np, cv2, imagehash
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from skimage.metrics import structural_similarity as compare_ssim
-from PyQt5.QtWidgets import *
-from PyQt5.QtCore import *
-from PyQt5.QtGui import *
+from PySide6.QtWidgets import *
+from PySide6.QtCore import *
+from PySide6.QtGui import *
 
 # --- 설정 ---
 OUTPUT_FOLDER = "captured_scores"
@@ -106,6 +106,17 @@ QComboBox QAbstractItemView {
     selection-color: #ffffff;
     border: 1px solid #d0d0d0;
     outline: none;
+}
+
+/* 체크박스 */
+QCheckBox {
+    spacing: 5px;
+}
+
+QCheckBox::indicator:unchecked:hover {
+    border: 1px solid #a0a0a0;
+    background-color: #f5f5f5;
+    border-radius: 2px;
 }
 
 /* 기본 버튼 */
@@ -212,11 +223,16 @@ QPushButton#deleteButton:pressed {
     background-color: #545b62;
 }
 
+QFrame#listContainer {
+    border: 1px solid #c0c0c0;
+    border-radius: 4px;
+    background-color: #ffffff;
+}
+
 /* 리스트 위젯 */
 QListWidget {
-    background-color: #ffffff;
-    border: 1px solid #d0d0d0;
-    border-radius: 4px;
+    background-color: transparent;
+    border: none;
     padding: 3px;
     color: #333333;
     outline: none;
@@ -225,8 +241,8 @@ QListWidget {
 QListWidget::item {
     background-color: #fafafa;
     border-radius: 3px;
-    padding: 6px 8px;
-    margin: 2px;
+    padding: 3px 8px;
+    margin: 1px;
     border: 1px solid #e8e8e8;
     color: #333333;
 }
@@ -318,17 +334,44 @@ QFrame#leftPanel {
 }
 """
 
+def grab_screen_area(x, y, w, h):
+    """멀티 모니터 지원 화면 캡처"""
+    screens = QApplication.screens()
+    target_rect = QRect(x, y, w, h)
+    
+    res_pixmap = QPixmap(w, h)
+    res_pixmap.fill(Qt.black)
+    
+    painter = QPainter(res_pixmap)
+    
+    for screen in screens:
+        geo = screen.geometry()
+        intersect = geo.intersected(target_rect)
+        
+        if not intersect.isEmpty():
+            local_x = intersect.x() - geo.x()
+            local_y = intersect.y() - geo.y()
+            
+            grab = screen.grabWindow(0, local_x, local_y, intersect.width(), intersect.height())
+            
+            dest_x = intersect.x() - x
+            dest_y = intersect.y() - y
+            painter.drawPixmap(dest_x, dest_y, grab)
+            
+    painter.end()
+    return res_pixmap
+
 class SelectionOverlay(QWidget):
     """영역 선택 오버레이"""
-    selection_finished = pyqtSignal(dict) 
-    selection_cancelled = pyqtSignal()
+    selection_finished = Signal(dict) 
+    selection_cancelled = Signal()
     
     def __init__(self, parent=None): 
         super().__init__(parent)
         # 전체 화면 오버레이 설정
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setCursor(Qt.CrossCursor)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setCursor(Qt.CursorShape.CrossCursor)
         
         self.start_pos = None
         self.current_pos = None
@@ -337,37 +380,41 @@ class SelectionOverlay(QWidget):
 
     def start(self):
         """화면 캡처 후 선택 모드 시작"""
-        desktop = QApplication.desktop()
-        rect = desktop.geometry()
-        self.setGeometry(rect)
+        screens = QApplication.screens()
+        x_min = min(s.geometry().x() for s in screens)
+        y_min = min(s.geometry().y() for s in screens)
+        x_max = max(s.geometry().x() + s.geometry().width() for s in screens)
+        y_max = max(s.geometry().y() + s.geometry().height() for s in screens)
+        
+        virtual_rect = QRect(x_min, y_min, x_max - x_min, y_max - y_min)
+        self.setGeometry(virtual_rect)
         
         # 현재 화면을 캡처하여 배경으로 사용 (Freeze 효과)
-        screen = QApplication.primaryScreen()
-        self.bg_pixmap = screen.grabWindow(0, rect.x(), rect.y(), rect.width(), rect.height())
+        self.bg_pixmap = grab_screen_area(virtual_rect.x(), virtual_rect.y(), virtual_rect.width(), virtual_rect.height())
         
         self.show()
         self.activateWindow()
         self.update()
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape:
+        if event.key() == Qt.Key.Key_Escape:
             self.close()
             self.selection_cancelled.emit()
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.start_pos = event.pos()
-            self.current_pos = event.pos()
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.start_pos = event.position().toPoint()
+            self.current_pos = event.position().toPoint()
             self.is_selecting = True
             self.update()
 
     def mouseMoveEvent(self, event):
         if self.is_selecting:
-            self.current_pos = event.pos()
+            self.current_pos = event.position().toPoint()
             self.update()
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton and self.is_selecting:
+        if event.button() == Qt.MouseButton.LeftButton and self.is_selecting:
             self.is_selecting = False
             rect = QRect(self.start_pos, self.current_pos).normalized()
             if rect.width() > 10 and rect.height() > 10:
@@ -410,7 +457,7 @@ class SelectionOverlay(QWidget):
                 painter.drawPixmap(rect, self.bg_pixmap, source_rect)
                 
                 # 테두리
-                pen = QPen(QColor(0, 120, 212), 2, Qt.SolidLine)
+                pen = QPen(QColor(0, 120, 212), 2, Qt.PenStyle.SolidLine)
                 painter.setPen(pen)
                 painter.drawRect(rect)
                 
@@ -428,9 +475,9 @@ class CaptureAreaIndicator(QWidget):
     def __init__(self, x, y, w, h, parent=None):
         super().__init__(parent)
         self.setGeometry(x, y, w, h)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents)  # 마우스 이벤트를 통과시킴
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)  # 마우스 이벤트를 통과시킴
         self.border_color = QColor(0, 255, 0)  # 기본: 초록색
         self.show()
 
@@ -441,15 +488,15 @@ class CaptureAreaIndicator(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         pen = QPen(self.border_color, 3)
-        pen.setStyle(Qt.DashLine)
+        pen.setStyle(Qt.PenStyle.DashLine)
         painter.setPen(pen)
         painter.drawRect(0, 0, self.width() - 1, self.height() - 1)
 
 class ClickableLabel(QLabel):
-    clicked = pyqtSignal()
+    clicked = Signal()
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(event)
 
@@ -478,17 +525,16 @@ def cv2_to_qpixmap(img_cv):
     rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
     h, w, ch = rgb.shape
     bytes_per_line = ch * w
-    qimg = QImage(rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+    qimg = QImage(rgb.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
     return QPixmap.fromImage(qimg)
 
 def qpixmap_to_cv(pixmap):
     """QPixmap을 OpenCV 이미지(BGR)로 변환"""
     if pixmap.isNull():
         return None
-    img = pixmap.toImage().convertToFormat(QImage.Format_RGB888)
+    img = pixmap.toImage().convertToFormat(QImage.Format.Format_RGB888)
     w, h = img.width(), img.height()
     ptr = img.constBits()
-    ptr.setsize(img.sizeInBytes())
     arr = np.array(ptr).reshape(h, img.bytesPerLine())
     # 패딩 제거 및 BGR 변환
     arr = arr[:, :w * 3].reshape(h, w, 3)
@@ -562,8 +608,8 @@ def calculate_best_cut_point(img, min_x, max_x):
     return min_x + np.argmin(col_sums_gray)
 
 class SlicerCanvas(QWidget):
-    point_added = pyqtSignal(int)
-    point_removed = pyqtSignal(int)
+    point_added = Signal(int)
+    point_removed = Signal(int)
 
     def __init__(self, pixmap, parent=None):
         super().__init__(parent)
@@ -571,7 +617,7 @@ class SlicerCanvas(QWidget):
         self.scale_factor = 1.0
         self.cut_points = []
         self.setFixedSize(pixmap.size())
-        self.setCursor(Qt.CrossCursor)
+        self.setCursor(Qt.CursorShape.CrossCursor)
         self.setMouseTracking(True)
         self.hover_x = -1
 
@@ -592,20 +638,20 @@ class SlicerCanvas(QWidget):
         self.update()
 
     def mouseMoveEvent(self, event):
-        self.hover_x = int(event.pos().x() / self.scale_factor)
+        self.hover_x = int(event.position().x() / self.scale_factor)
         self.update()
 
     def mousePressEvent(self, event):
-        sx = event.pos().x()
+        sx = event.position().x()
         x = int(sx / self.scale_factor)
         x = max(0, min(x, self.pixmap.width()))
         
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             self.cut_points.append(x)
             self.cut_points.sort()
             self.point_added.emit(x)
             self.update()
-        elif event.button() == Qt.RightButton:
+        elif event.button() == Qt.MouseButton.RightButton:
             closest = -1
             min_dist_screen = 20
             for p in self.cut_points:
@@ -631,7 +677,7 @@ class SlicerCanvas(QWidget):
             painter.drawLine(x, 0, x, h)
             
         if 0 <= self.hover_x < self.pixmap.width():
-            pen_hover = QPen(QColor(0, 120, 212, 150), 1.0 / self.scale_factor, Qt.DashLine)
+            pen_hover = QPen(QColor(0, 120, 212, 150), 1.0 / self.scale_factor, Qt.PenStyle.DashLine)
             painter.setPen(pen_hover)
             painter.drawLine(self.hover_x, 0, self.hover_x, h)
 
@@ -654,8 +700,8 @@ class ScrollSlicerDialog(QDialog):
         
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        self.scroll.setAlignment(Qt.AlignCenter)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         self.pixmap = cv2_to_qpixmap(image)
         self.canvas = SlicerCanvas(self.pixmap)
@@ -708,9 +754,9 @@ class ScrollSlicerDialog(QDialog):
         reply = QMessageBox.question(
             self, "이전 편집 복구", 
             "이전에 편집했던 자르기 위치를 불러오시겠습니까?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes
         )
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             self.canvas.set_cut_points(points)
             self.update_slice_count()
         else:
@@ -718,7 +764,7 @@ class ScrollSlicerDialog(QDialog):
 
     def eventFilter(self, source, event):
         if event.type() == QEvent.Wheel:
-            if event.modifiers() & Qt.ControlModifier:
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 self.canvas.perform_zoom(event.angleDelta().y())
                 return True
             else:
@@ -797,8 +843,8 @@ class DraggableScrollArea(QScrollArea):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWidgetResizable(False)
-        self.setAlignment(Qt.AlignCenter)
-        self.setCursor(Qt.OpenHandCursor)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.last_pos = QPoint()
         self.scale_factor = 1.0
         self.original_pixmap = None
@@ -843,27 +889,27 @@ class DraggableScrollArea(QScrollArea):
         new_h = int(self.original_pixmap.height() * self.scale_factor)
         
         self.label.setPixmap(self.original_pixmap.scaled(
-            new_w, new_h, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            new_w, new_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
         ))
         self.label.resize(new_w, new_h)
         event.accept()
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.last_pos = event.pos()
-            self.setCursor(Qt.ClosedHandCursor)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.last_pos = event.position().toPoint()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if event.buttons() & Qt.LeftButton:
-            delta = event.pos() - self.last_pos
-            self.last_pos = event.pos()
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            delta = event.position().toPoint() - self.last_pos
+            self.last_pos = event.position().toPoint()
             self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
             self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        self.setCursor(Qt.OpenHandCursor)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
         super().mouseReleaseEvent(event)
 
 class ImageDetailDialog(QDialog):
@@ -885,8 +931,8 @@ class ImageDetailDialog(QDialog):
 
 class ScoreEditorWidget(QWidget):
     """PDF 생성 전 메타데이터 입력 및 미리보기 위젯"""
-    save_requested = pyqtSignal(dict)
-    cancel_requested = pyqtSignal()
+    save_requested = Signal(dict)
+    cancel_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -912,7 +958,7 @@ class ScoreEditorWidget(QWidget):
         # 1. 메타데이터 입력
         info_group = QGroupBox("기본 정보")
         form_layout = QFormLayout()
-        form_layout.setLabelAlignment(Qt.AlignRight)
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form_layout.setSpacing(10)
         
         self.title_edit = QLineEdit()
@@ -984,7 +1030,7 @@ class ScoreEditorWidget(QWidget):
 
         # --- 중앙 미리보기 영역 ---
         preview_frame = QFrame()
-        preview_frame.setFrameShape(QFrame.StyledPanel)
+        preview_frame.setFrameShape(QFrame.Shape.StyledPanel)
         preview_frame.setStyleSheet("background-color: #525659; border: 1px solid #444;")
         
         preview_layout_inner = QVBoxLayout(preview_frame)
@@ -1016,7 +1062,7 @@ class ScoreEditorWidget(QWidget):
         self.preview_content = QWidget()
         self.preview_content.setStyleSheet("background-color: #525659;")
         self.preview_layout = QVBoxLayout(self.preview_content)
-        self.preview_layout.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+        self.preview_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         self.preview_layout.setSpacing(30)
         self.preview_layout.setContentsMargins(40, 40, 40, 40)
         
@@ -1032,13 +1078,13 @@ class ScoreEditorWidget(QWidget):
         
         self.btn_cancel = QPushButton("뒤로 가기")
         self.btn_cancel.setMinimumHeight(38)
-        self.btn_cancel.setCursor(Qt.PointingHandCursor)
+        self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cancel.clicked.connect(self.cancel_requested.emit)
         
         self.btn_save = QPushButton("저장하기")
         self.btn_save.setObjectName("captureButton")
         self.btn_save.setMinimumHeight(38)
-        self.btn_save.setCursor(Qt.PointingHandCursor)
+        self.btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save.clicked.connect(lambda: self.save_requested.emit({
             'title': self.title_edit.text(),
             'composer': self.composer_edit.text(),
@@ -1081,7 +1127,7 @@ class ScoreEditorWidget(QWidget):
             enhance = self.chk_enhance.isChecked()
             invert = self.chk_invert.isChecked()
             dlg = ImageDetailDialog(path, enhance, invert, self)
-            dlg.exec_()
+            dlg.exec()
 
     def trigger_refresh(self):
         self.debounce_timer.start(500)
@@ -1218,8 +1264,8 @@ class ScoreEditorWidget(QWidget):
             if title or composer or bpm:
                 if title:
                     lbl_title = QLabel(title, current_page_widget)
-                    lbl_title.setAlignment(Qt.AlignCenter)
-                    font = QFont(self.font_bold, int(title_font_size/1.3), QFont.Bold)
+                    lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    font = QFont(self.font_bold, int(title_font_size/1.3), QFont.Weight.Bold)
                     lbl_title.setFont(font)
                     lbl_title.adjustSize()
                     
@@ -1236,7 +1282,7 @@ class ScoreEditorWidget(QWidget):
 
                 if composer:
                     lbl_comp = QLabel(composer, current_page_widget)
-                    lbl_comp.setAlignment(Qt.AlignRight)
+                    lbl_comp.setAlignment(Qt.AlignmentFlag.AlignRight)
                     font = QFont(self.font_regular, int(comp_font_size/1.3))
                     lbl_comp.setFont(font)
                     lbl_comp.adjustSize()
@@ -1254,8 +1300,8 @@ class ScoreEditorWidget(QWidget):
 
                 if bpm:
                     lbl_bpm = QLabel(f"BPM: {bpm}", current_page_widget)
-                    lbl_bpm.setAlignment(Qt.AlignLeft)
-                    font = QFont(self.font_bold, int(comp_font_size/1.3), QFont.Bold)
+                    lbl_bpm.setAlignment(Qt.AlignmentFlag.AlignLeft)
+                    font = QFont(self.font_bold, int(comp_font_size/1.3), QFont.Weight.Bold)
                     lbl_bpm.setFont(font)
                     lbl_bpm.adjustSize()
                     
@@ -1318,10 +1364,10 @@ class ScoreEditorWidget(QWidget):
                 
                 # 이미지 그리기
                 display_h = int(new_h_pdf * scale)
-                scaled_pix = pix.scaled(display_content_width, display_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                scaled_pix = pix.scaled(display_content_width, display_h, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
                 
                 lbl_img = ClickableLabel(current_page_widget)
-                lbl_img.setCursor(Qt.PointingHandCursor)
+                lbl_img.setCursor(Qt.CursorShape.PointingHandCursor)
                 lbl_img.setToolTip("클릭하여 크게 보기")
                 lbl_img.clicked.connect(lambda p=path: self.show_large_image(p))
                 lbl_img.setPixmap(scaled_pix)
@@ -1370,11 +1416,11 @@ class ScoreEditorWidget(QWidget):
 
 class CaptureWorker(QObject):
     """캡처 및 이미지 처리를 담당하는 워커 스레드"""
-    finished_processing = pyqtSignal()
-    request_clean_capture = pyqtSignal()
-    image_saved = pyqtSignal(str, object)  # filename, img_bgr
-    scroll_updated = pyqtSignal(object)    # img_bgr
-    status_updated = pyqtSignal(str)
+    finished_processing = Signal()
+    request_clean_capture = Signal()
+    image_saved = Signal(str, object)  # filename, img_bgr
+    scroll_updated = Signal(object)    # img_bgr
+    status_updated = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -1505,9 +1551,9 @@ class CaptureWorker(QObject):
 
 class MainWindow(QMainWindow):
     # 워커 스레드 통신용 시그널
-    sig_process_frame = pyqtSignal(object, int, float)
-    sig_save_clean = pyqtSignal(object)
-    sig_reset_worker = pyqtSignal()
+    sig_process_frame = Signal(object, int, float)
+    sig_save_clean = Signal(object)
+    sig_reset_worker = Signal()
 
     def __init__(self):
         super().__init__()
@@ -1547,7 +1593,7 @@ class MainWindow(QMainWindow):
         # 1. 캡처 버튼 설정
         if is_mini:
             self.btn_capture.setFixedHeight(32)
-            self.btn_capture.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.btn_capture.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             if is_capturing:
                 self.btn_capture.setText("중지")
                 self.btn_capture.setStyleSheet("font-size: 12px; font-weight: bold; border-radius: 4px; border: none; color: white; background-color: #dc3545;")
@@ -1557,7 +1603,7 @@ class MainWindow(QMainWindow):
         else:
             self.btn_capture.setMinimumHeight(42)
             self.btn_capture.setMaximumHeight(16777215)
-            self.btn_capture.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+            self.btn_capture.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
             self.btn_capture.setStyleSheet("") # Reset to use global stylesheet
             
             if is_capturing:
@@ -1573,13 +1619,13 @@ class MainWindow(QMainWindow):
         if is_mini:
             self.btn_select.setText("1. 영역")
             self.btn_select.setFixedHeight(32)
-            self.btn_select.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.btn_select.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             self.btn_select.setStyleSheet("font-size: 12px; font-weight: bold; border-radius: 4px; border: none; color: white; background-color: #6a5acd;")
         else:
             self.btn_select.setText("1. 영역 선택")
             self.btn_select.setMinimumHeight(36)
             self.btn_select.setMaximumHeight(16777215)
-            self.btn_select.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+            self.btn_select.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
             self.btn_select.setStyleSheet("")
 
     def setup_worker(self):
@@ -1636,7 +1682,7 @@ class MainWindow(QMainWindow):
         
         # 헤더
         header_widget = QWidget()
-        header_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        header_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -1689,7 +1735,7 @@ class MainWindow(QMainWindow):
         # 투명도 조절
         opacity_layout = QHBoxLayout()
         opacity_layout.addWidget(QLabel("투명도:"))
-        self.opacity_slider = QSlider(Qt.Horizontal)
+        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.opacity_slider.setRange(20, 100)
         self.opacity_slider.setValue(100)
         self.opacity_slider.valueChanged.connect(self.change_opacity)
@@ -1714,7 +1760,7 @@ class MainWindow(QMainWindow):
         self.btn_capture.setEnabled(False)
         self.btn_capture.clicked.connect(self.toggle_capture)
 
-        self.buttons_layout = QBoxLayout(QBoxLayout.TopToBottom)
+        self.buttons_layout = QBoxLayout(QBoxLayout.Direction.TopToBottom)
         self.buttons_layout.addWidget(self.btn_select)
         self.buttons_layout.addWidget(self.btn_capture)
         control_layout.addLayout(self.buttons_layout)
@@ -1734,14 +1780,22 @@ class MainWindow(QMainWindow):
         list_section.setObjectName("sectionLabel")
         capture_layout.addWidget(list_section)
         
+        self.list_container = QFrame()
+        self.list_container.setObjectName("listContainer")
+        list_cont_layout = QVBoxLayout(self.list_container)
+        list_cont_layout.setContentsMargins(0, 0, 0, 0)
+        list_cont_layout.setSpacing(0)
+
         self.list_widget = QListWidget()
+        self.list_widget.setFrameShape(QFrame.Shape.NoFrame)
         self.list_widget.setMinimumHeight(100)
-        self.list_widget.setDragDropMode(QAbstractItemView.InternalMove)
-        self.list_widget.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.list_widget.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.list_widget.itemClicked.connect(self.show_image_preview)
         self.list_widget.model().rowsMoved.connect(self.on_list_order_changed)
         self.list_widget.model().rowsRemoved.connect(self.on_list_order_changed)
-        capture_layout.addWidget(self.list_widget)
+        list_cont_layout.addWidget(self.list_widget)
+        capture_layout.addWidget(self.list_container)
         
         # 버튼 레이아웃 (선택 삭제 / 전체 초기화)
         list_btn_layout = QHBoxLayout()
@@ -1785,7 +1839,7 @@ class MainWindow(QMainWindow):
 
         # 미니 모드용 미리보기 (초기엔 숨김)
         self.mini_preview_label = QLabel()
-        self.mini_preview_label.setAlignment(Qt.AlignCenter)
+        self.mini_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.mini_preview_label.setMinimumHeight(150)
         self.mini_preview_label.setStyleSheet("background-color: #f0f0f0; color: #666; border-radius: 4px; border: 1px solid #d0d0d0;")
         self.mini_preview_label.hide()
@@ -1802,7 +1856,7 @@ class MainWindow(QMainWindow):
         # 5. 상태
         self.status_label = QLabel("준비 완료")
         self.status_label.setObjectName("statusLabel")
-        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setMinimumHeight(32)
         self.status_label.setWordWrap(True)
         left_layout.addWidget(self.status_label)
@@ -1817,9 +1871,9 @@ class MainWindow(QMainWindow):
         
         self.image_preview_label = QLabel("영역을 선택하고 캡처를 시작하세요.\n캡처된 이미지가 여기에 표시됩니다.")
         self.image_preview_label.setObjectName("previewLabel")
-        self.image_preview_label.setAlignment(Qt.AlignCenter)
+        self.image_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_preview_label.setStyleSheet("background-color: #e0e0e0; border: 2px dashed #aaa; border-radius: 10px; font-size: 14px; color: #666;")
-        self.image_preview_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.image_preview_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         
         preview_layout.addWidget(QLabel("현재 캡처 미리보기", styleSheet="font-weight:bold; font-size:14px;"))
         preview_layout.addWidget(self.image_preview_label, 1)
@@ -1838,7 +1892,7 @@ class MainWindow(QMainWindow):
         self.overlay.selection_finished.connect(self.finish_selection)
         self.overlay.selection_cancelled.connect(self.on_selection_cancelled)
         
-        splitter = QSplitter(Qt.Horizontal)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left_panel)
         splitter.addWidget(self.right_stack)
         splitter.setStretchFactor(0, 0)
@@ -1850,7 +1904,7 @@ class MainWindow(QMainWindow):
     def toggle_mini_mode(self, checked):
         left_panel = self.findChild(QFrame, "leftPanel")
 
-        self.buttons_layout.setDirection(QBoxLayout.LeftToRight if checked else QBoxLayout.TopToBottom)
+        self.buttons_layout.setDirection(QBoxLayout.Direction.LeftToRight if checked else QBoxLayout.Direction.TopToBottom)
 
         if checked:
             self.right_stack.hide()
@@ -1866,8 +1920,8 @@ class MainWindow(QMainWindow):
                     left_panel.layout().setContentsMargins(5, 5, 5, 5)
 
             self.setFixedSize(320, 460)
-            self.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint | Qt.CustomizeWindowHint | 
-                              Qt.WindowTitleHint | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
+            self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.CustomizeWindowHint | 
+                              Qt.WindowType.WindowTitleHint | Qt.WindowType.WindowCloseButtonHint | Qt.WindowType.WindowMinimizeButtonHint)
             
             self.btn_pdf.setText("3. 편집 및 저장")
             self.status_label.setFixedHeight(28)
@@ -1894,9 +1948,9 @@ class MainWindow(QMainWindow):
             self.resize(1200, 700)
             
             # 일반 모드로 돌아올 때 '항상 위' 체크 여부 확인
-            flags = Qt.Window
+            flags = Qt.WindowType.Window
             if hasattr(self, 'chk_always_on_top') and self.chk_always_on_top.isChecked():
-                flags |= Qt.WindowStaysOnTopHint
+                flags |= Qt.WindowType.WindowStaysOnTopHint
             self.setWindowFlags(flags)
             
             self.btn_pdf.setText("3. 편집 및 저장")
@@ -1914,11 +1968,12 @@ class MainWindow(QMainWindow):
     def toggle_always_on_top(self, state):
         if self.btn_mini.isChecked():
             return # 미니모드는 이미 항상 위에 표시됨
-            
-        if state == Qt.Checked:
-            self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
-        else:
-            self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
+        
+        flags = Qt.WindowType.Window
+        if state == Qt.CheckState.Checked.value:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+
+        self.setWindowFlags(flags)
         self.show()
         self.raise_()
         self.activateWindow()
@@ -1997,8 +2052,8 @@ class MainWindow(QMainWindow):
             if self.captured_files:
                 reply = QMessageBox.question(self, '새 캡처 시작', 
                                            '새로운 캡처를 시작하면 기존 캡처 데이터가 모두 삭제됩니다.\n계속하시겠습니까?',
-                                           QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-                if reply != QMessageBox.Yes:
+                                           QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+                if reply != QMessageBox.StandardButton.Yes:
                     return
             self.start_capture()
         else:
@@ -2062,7 +2117,7 @@ class MainWindow(QMainWindow):
             self.btn_reslice.show()
             
             dlg = ScrollSlicerDialog(full_img, self.capture_area_dict['width'], self)
-            if dlg.exec_() == QDialog.Accepted:
+            if dlg.exec() == QDialog.DialogCode.Accepted:
                 self.last_cut_points = dlg.canvas.cut_points
                 sliced_images = dlg.get_sliced_images()
                 for img in sliced_images:
@@ -2089,7 +2144,7 @@ class MainWindow(QMainWindow):
         self.is_saved = False
         
         item = QListWidgetItem(os.path.basename(filename))
-        item.setData(Qt.UserRole, filename)
+        item.setData(Qt.ItemDataRole.UserRole, filename)
         self.list_widget.addItem(item)
         self.list_widget.scrollToBottom()
         self.display_image(filename)
@@ -2104,25 +2159,25 @@ class MainWindow(QMainWindow):
                 self, 
                 "다시 자르기", 
                 "기존 캡처 목록을 초기화하시겠습니까?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
             )
             
-            if reply == QMessageBox.No:
+            if reply == QMessageBox.StandardButton.No:
                 return
             
-            should_clear = (reply == QMessageBox.Yes)
+            should_clear = (reply == QMessageBox.StandardButton.Yes)
         
         width = self.capture_area_dict['width'] if self.capture_area_dict else self.last_stitched_image.shape[1]
         dlg = ScrollSlicerDialog(self.last_stitched_image, width, self, initial_points=self.last_cut_points)
-        if dlg.exec_() == QDialog.Accepted:
+        if dlg.exec() == QDialog.DialogCode.Accepted:
             self.last_cut_points = dlg.canvas.cut_points
             # 기존 이미지 삭제 로직 수행
             if should_clear:
                 # 디스크에서 파일 삭제
                 for i in range(self.list_widget.count()):
                     item = self.list_widget.item(i)
-                    path = item.data(Qt.UserRole)
+                    path = item.data(Qt.ItemDataRole.UserRole)
                     if path and os.path.exists(path):
                         try:
                             os.remove(path)
@@ -2160,9 +2215,7 @@ class MainWindow(QMainWindow):
                 time.sleep(0.2)
 
             # 화면 캡처 (Global Coordinates)
-            screen = QApplication.primaryScreen()
-            # grabWindow(0)은 데스크탑 전체를 의미, 좌표는 글로벌 좌표
-            pixmap = screen.grabWindow(0, self.capture_area_dict['left'], self.capture_area_dict['top'], w, h)
+            pixmap = grab_screen_area(self.capture_area_dict['left'], self.capture_area_dict['top'], w, h)
             
             # 스크롤 모드일 경우: 캡처 후 인디케이터 복구
             if is_scroll_mode and self.area_indicator:
@@ -2197,8 +2250,7 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
             time.sleep(0.1)
 
-        screen = QApplication.primaryScreen()
-        pixmap_clean = screen.grabWindow(0, self.capture_area_dict['left'], self.capture_area_dict['top'], 
+        pixmap_clean = grab_screen_area(self.capture_area_dict['left'], self.capture_area_dict['top'], 
                                        self.capture_area_dict['width'], self.capture_area_dict['height'])
         
         if self.area_indicator:
@@ -2212,7 +2264,7 @@ class MainWindow(QMainWindow):
         self.captured_files.append(filename)
         self.is_saved = False
         item = QListWidgetItem(os.path.basename(filename))
-        item.setData(Qt.UserRole, filename)
+        item.setData(Qt.ItemDataRole.UserRole, filename)
         self.list_widget.addItem(item)
         self.list_widget.scrollToBottom()
         
@@ -2245,7 +2297,7 @@ class MainWindow(QMainWindow):
 
     def show_image_preview(self, item):
         # UserRole에서 경로 가져오기
-        path = item.data(Qt.UserRole)
+        path = item.data(Qt.ItemDataRole.UserRole)
         if not path:
             path = os.path.join(OUTPUT_FOLDER, item.text())
         self.display_image(path)
@@ -2270,8 +2322,8 @@ class MainWindow(QMainWindow):
             
             scaled_pixmap = self.current_original_pixmap.scaled(
                 target_size, 
-                Qt.KeepAspectRatio, 
-                Qt.SmoothTransformation
+                Qt.AspectRatioMode.KeepAspectRatio, 
+                Qt.TransformationMode.SmoothTransformation
             )
             self.image_preview_label.setPixmap(scaled_pixmap)
 
@@ -2280,7 +2332,7 @@ class MainWindow(QMainWindow):
             if self.current_original_pixmap and not self.current_original_pixmap.isNull():
                 target_size = self.mini_preview_label.size() - QSize(4, 4)
                 scaled = self.current_original_pixmap.scaled(
-                    target_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    target_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
                 )
                 self.mini_preview_label.setPixmap(scaled)
             else:
@@ -2297,7 +2349,7 @@ class MainWindow(QMainWindow):
         files = []
         for i in range(self.list_widget.count()):
             item = self.list_widget.item(i)
-            path = item.data(Qt.UserRole)
+            path = item.data(Qt.ItemDataRole.UserRole)
             if path and os.path.exists(path):
                 files.append(path)
         return files
@@ -2308,14 +2360,14 @@ class MainWindow(QMainWindow):
             return
             
         reply = QMessageBox.question(self, '삭제 확인', f'선택한 {len(items)}개의 이미지를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.',
-                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply != QMessageBox.Yes:
+                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
             return
 
         for item in items:
             row = self.list_widget.row(item)
             self.list_widget.takeItem(row)
-            full_path = item.data(Qt.UserRole)
+            full_path = item.data(Qt.ItemDataRole.UserRole)
             
             if full_path in self.captured_files:
                 self.captured_files.remove(full_path)
@@ -2341,8 +2393,8 @@ class MainWindow(QMainWindow):
     def reset_all(self):
         """모든 데이터 초기화 및 캡처 모드 복귀"""
         reply = QMessageBox.question(self, '초기화 확인', '모든 캡처 데이터를 삭제하고 초기화하시겠습니까?',
-                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
+                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
             self.current_scroll_chunks = []
             self.last_stitched_image = None
             self.last_cut_points = None
@@ -2367,7 +2419,7 @@ class MainWindow(QMainWindow):
             self.editor_widget.load_preview(files)
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Delete and self.list_widget.hasFocus():
+        if event.key() == Qt.Key.Key_Delete and self.list_widget.hasFocus():
             self.delete_selected_item()
         super().keyPressEvent(event)
 
@@ -2597,9 +2649,9 @@ class MainWindow(QMainWindow):
             msg = QMessageBox(self)
             msg.setWindowTitle(msg_title)
             msg.setText(msg_text)
-            msg.setIcon(QMessageBox.Information)
+            msg.setIcon(QMessageBox.Icon.Information)
             msg.setStyleSheet(MODERN_STYLESHEET)
-            msg.exec_()
+            msg.exec()
             self.switch_to_capture()
             
         except Exception as e:
@@ -2610,8 +2662,8 @@ class MainWindow(QMainWindow):
         if self.captured_files and not self.is_saved:
             reply = QMessageBox.question(self, '종료 확인', 
                                        '저장되지 않은 캡처 데이터가 있습니다.\n정말로 종료하시겠습니까?',
-                                       QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if reply != QMessageBox.Yes:
+                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+            if reply != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
 
@@ -2629,10 +2681,8 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == "__main__":
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
     app = QApplication(sys.argv)
     
     window = MainWindow()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
