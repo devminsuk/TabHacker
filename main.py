@@ -5,7 +5,13 @@ from PySide6.QtCore import *
 from PySide6.QtGui import *
 
 # --- 설정 ---
-OUTPUT_FOLDER = "captured_scores"
+OUTPUT_FOLDER = "captured_scores"  # 캡처된 이미지가 저장될 폴더명
+DEFAULT_SENSITIVITY = "0.9"        # 이미지 변화 감지 민감도 (SSIM 임계값)
+DEFAULT_DELAY = "3"                # 캡처 시작 전 카운트다운 (초)
+DEFAULT_MARGIN = "60"              # PDF 생성 시 페이지 여백 (px)
+DEFAULT_SPACING = "40"             # PDF 생성 시 이미지 간 간격 (px)
+DEFAULT_OPACITY = 100              # 프로그램 창 기본 투명도 (100 = 불투명)
+MIN_OPACITY = 20                   # 프로그램 창 최소 투명도
 
 # --- 폰트 설정 ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -1171,8 +1177,10 @@ class ScoreEditorWidget(QWidget):
         settings_form.setSpacing(10)
         
         self.margin_edit = QLineEdit("60")
+        self.margin_edit = QLineEdit(DEFAULT_MARGIN)
         self.margin_edit.setMinimumHeight(30)
         self.spacing_edit = QLineEdit("40")
+        self.spacing_edit = QLineEdit(DEFAULT_SPACING)
         self.spacing_edit.setMinimumHeight(30)
         
         self.page_num_pos = QComboBox()
@@ -1328,6 +1336,8 @@ class ScoreEditorWidget(QWidget):
         self.url_edit.clear()
         self.margin_edit.setText("60")
         self.spacing_edit.setText("40")
+        self.margin_edit.setText(DEFAULT_MARGIN)
+        self.spacing_edit.setText(DEFAULT_SPACING)
         self.page_num_pos.setCurrentIndex(0)
         self.chk_enhance.setChecked(False)
         self.chk_invert.setChecked(False)
@@ -1451,6 +1461,8 @@ class ScoreEditorWidget(QWidget):
             except ValueError:
                 margin = 60
                 spacing = 40
+                margin = int(DEFAULT_MARGIN)
+                spacing = int(DEFAULT_SPACING)
             page_num_pos_str = self.page_num_pos.currentText()
 
             # 다크모드 설정
@@ -2034,12 +2046,14 @@ class MainWindow(QMainWindow):
         settings_h = QHBoxLayout()
         settings_h.addWidget(QLabel("민감도:"))
         self.sensitivity_input = QLineEdit("0.9")
+        self.sensitivity_input = QLineEdit(DEFAULT_SENSITIVITY)
         self.sensitivity_input.setMaximumWidth(50)
         self.sensitivity_input.setMinimumHeight(28)
         settings_h.addWidget(self.sensitivity_input)
         
         settings_h.addWidget(QLabel("딜레이:"))
         self.delay_input = QLineEdit("3")
+        self.delay_input = QLineEdit(DEFAULT_DELAY)
         self.delay_input.setMaximumWidth(50)
         self.delay_input.setMinimumHeight(28)
         settings_h.addWidget(self.delay_input)
@@ -2054,6 +2068,8 @@ class MainWindow(QMainWindow):
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.opacity_slider.setRange(20, 100)
         self.opacity_slider.setValue(100)
+        self.opacity_slider.setRange(MIN_OPACITY, DEFAULT_OPACITY)
+        self.opacity_slider.setValue(DEFAULT_OPACITY)
         self.opacity_slider.valueChanged.connect(self.change_opacity)
         opacity_layout.addWidget(self.opacity_slider)
         
@@ -2799,9 +2815,13 @@ class MainWindow(QMainWindow):
             try:
                 margin = int(metadata.get('margin', 60))
                 spacing = int(metadata.get('spacing', 40))
+                margin = int(metadata.get('margin', DEFAULT_MARGIN))
+                spacing = int(metadata.get('spacing', DEFAULT_SPACING))
             except ValueError:
                 margin = 60
                 spacing = 40
+                margin = int(DEFAULT_MARGIN)
+                spacing = int(DEFAULT_SPACING)
             
             page_num_pos = metadata.get('page_num_pos', '하단 중앙')
             use_basic = metadata.get('enhance', False)
