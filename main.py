@@ -1,11 +1,11 @@
-import sys, os, re, time, qrcode, numpy as np, cv2, imagehash
+import sys, os, re, time, qrcode, numpy as np, cv2, imagehash, tempfile, shutil
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
 
 # --- 설정 ---
-OUTPUT_FOLDER = "captured_scores"  # 캡처된 이미지가 저장될 폴더명
+OUTPUT_FOLDER = os.path.join(tempfile.gettempdir(), f"ScoreCapturePro_{os.getpid()}")  # 임시 폴더 경로
 DEFAULT_SENSITIVITY = "0.9"        # 이미지 변화 감지 민감도 (SSIM 임계값)
 DEFAULT_DELAY = "3"                # 캡처 시작 전 카운트다운 (초)
 DEFAULT_MARGIN = "60"              # PDF 생성 시 페이지 여백 (px)
@@ -3038,6 +3038,14 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'worker_thread'):
             self.worker_thread.quit()
             self.worker_thread.wait()
+
+        # 프로그램 종료 시 임시 폴더 및 파일 정리
+        if os.path.exists(OUTPUT_FOLDER):
+            try:
+                shutil.rmtree(OUTPUT_FOLDER, ignore_errors=True)
+            except Exception:
+                pass
+
         super().closeEvent(event)
         QApplication.instance().quit()
 
