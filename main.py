@@ -930,17 +930,34 @@ class DraggableScrollArea(QScrollArea):
         self.original_pixmap = None
         self.label = None
 
-    def set_image(self, image_path, use_basic=False, invert=False, image_data=None, use_high=False):
+    def set_image(self, image_path, use_basic=False, invert=False, image_data=None, use_high=False, adaptive=False):
         if image_data is not None:
             img = image_data
+            if adaptive:
+                if len(img.shape) == 3 and img.shape[2] == 3:
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                else:
+                    gray = img
+                binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 10)
+                img = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+
             if invert:
                 img = cv2.bitwise_not(img)
             self.original_pixmap = cv2_to_qpixmap(img)
-        elif use_basic or use_high or invert:
+        elif use_basic or use_high or invert or adaptive:
             img = imread_unicode(image_path)
             if img is not None:
                 if use_basic or use_high:
                     img = enhance_score_image(img, use_basic=use_basic, use_high=use_high)
+                
+                if adaptive:
+                    if len(img.shape) == 3 and img.shape[2] == 3:
+                        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    else:
+                        gray = img
+                    binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 10)
+                    img = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+
                 if invert:
                     img = cv2.bitwise_not(img)
                 self.original_pixmap = cv2_to_qpixmap(img)
@@ -998,7 +1015,7 @@ class DraggableScrollArea(QScrollArea):
         super().mouseReleaseEvent(event)
 
 class ImageDetailDialog(QDialog):
-    def __init__(self, image_path, use_basic=False, invert=False, parent=None, image_data=None, use_high=False):
+    def __init__(self, image_path, use_basic=False, invert=False, parent=None, image_data=None, use_high=False, adaptive=False):
         super().__init__(parent)
         self.setWindowTitle("이미지 상세 보기 (드래그:이동, 휠:확대/축소)")
         self.resize(1000, 800)
@@ -1006,7 +1023,7 @@ class ImageDetailDialog(QDialog):
         layout = QVBoxLayout(self)
         
         scroll = DraggableScrollArea()
-        scroll.set_image(image_path, use_basic, invert, image_data=image_data, use_high=use_high)
+        scroll.set_image(image_path, use_basic, invert, image_data=image_data, use_high=use_high, adaptive=adaptive)
         layout.addWidget(scroll)
         
         btn_close = QPushButton("닫기")
@@ -1124,14 +1141,27 @@ class ScoreEditorWidget(QWidget):
         self.chk_high_quality.setEnabled(True)
         self.chk_high_quality.toggled.connect(self.on_high_quality_toggled)
 
+        vbox_enhance = QVBoxLayout()
+        vbox_enhance.setSpacing(5)
+        vbox_enhance.addWidget(self.chk_enhance)
+        vbox_enhance.addWidget(self.chk_high_quality)
+
         self.chk_invert = QCheckBox("다크모드 (색상 반전)")
         self.chk_invert.setChecked(False)
         self.chk_invert.stateChanged.connect(self.refresh_preview)
         
+        self.chk_adaptive = QCheckBox("적응형 이진화")
+        self.chk_adaptive.setChecked(False)
+        self.chk_adaptive.stateChanged.connect(self.refresh_preview)
+
+        vbox_filter = QVBoxLayout()
+        vbox_filter.setSpacing(5)
+        vbox_filter.addWidget(self.chk_invert)
+        vbox_filter.addWidget(self.chk_adaptive)
+
         chk_layout = QHBoxLayout()
-        chk_layout.addWidget(self.chk_enhance)
-        chk_layout.addWidget(self.chk_high_quality)
-        chk_layout.addWidget(self.chk_invert)
+        chk_layout.addLayout(vbox_enhance)
+        chk_layout.addLayout(vbox_filter)
         
         settings_form.addRow("여백 (px):", self.margin_edit)
         settings_form.addRow("간격 (px):", self.spacing_edit)
@@ -1213,7 +1243,8 @@ class ScoreEditorWidget(QWidget):
             'page_num_pos': self.page_num_pos.currentText(),
             'enhance': self.chk_enhance.isChecked(),
             'high_quality': self.chk_high_quality.isChecked(),
-            'invert': self.chk_invert.isChecked()
+            'invert': self.chk_invert.isChecked(),
+            'adaptive': self.chk_adaptive.isChecked()
         }))
         
         btn_layout.addWidget(self.btn_cancel, 1)
@@ -1253,6 +1284,7 @@ class ScoreEditorWidget(QWidget):
         self.page_num_pos.setCurrentIndex(0)
         self.chk_enhance.setChecked(False)
         self.chk_invert.setChecked(False)
+        self.chk_adaptive.setChecked(False)
         self.current_files = []
         self.clear_image_cache()
         while self.preview_layout.count():
@@ -1265,6 +1297,7 @@ class ScoreEditorWidget(QWidget):
             invert = self.chk_invert.isChecked()
             use_basic = self.chk_enhance.isChecked()
             use_high = self.chk_high_quality.isChecked()
+            adaptive = self.chk_adaptive.isChecked()
             img_data = None
             
             if use_high and path in self.hq_cache:
@@ -1274,10 +1307,10 @@ class ScoreEditorWidget(QWidget):
             
             if img_data is not None:
                 # 이미 화질 개선된 데이터이므로 옵션은 False로 전달
-                dlg = ImageDetailDialog(path, use_basic=False, invert=invert, parent=self, image_data=img_data)
+                dlg = ImageDetailDialog(path, use_basic=False, invert=invert, parent=self, image_data=img_data, adaptive=adaptive)
             else:
                 # 캐시가 없으면 기존 방식대로
-                dlg = ImageDetailDialog(path, use_basic=use_basic, invert=invert, parent=self, use_high=use_high)
+                dlg = ImageDetailDialog(path, use_basic=use_basic, invert=invert, parent=self, use_high=use_high, adaptive=adaptive)
             dlg.exec()
 
     def trigger_refresh(self):
@@ -1375,6 +1408,7 @@ class ScoreEditorWidget(QWidget):
 
             # 다크모드 설정
             is_invert = self.chk_invert.isChecked()
+            is_adaptive = self.chk_adaptive.isChecked()
             bg_color_hex = "#000000" if is_invert else "#ffffff"
             text_color_hex = "#ffffff" if is_invert else "#000000"
 
@@ -1574,6 +1608,14 @@ class ScoreEditorWidget(QWidget):
                     
                 if img_cv is None: continue
                 
+                if is_adaptive:
+                    if len(img_cv.shape) == 3 and img_cv.shape[2] == 3:
+                        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+                    else:
+                        gray = img_cv
+                    binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 10)
+                    img_cv = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+
                 if is_invert:
                     img_cv = cv2.bitwise_not(img_cv)
                 
@@ -2723,6 +2765,7 @@ class MainWindow(QMainWindow):
             use_basic = metadata.get('enhance', False)
             use_high = metadata.get('high_quality', False)
             do_invert = metadata.get('invert', False)
+            do_adaptive = metadata.get('adaptive', False)
             
             bg_color = "black" if do_invert else "white"
             text_fill_color = "white" if do_invert else "black"
@@ -2736,7 +2779,7 @@ class MainWindow(QMainWindow):
 
             image_objects = []
             for f in files:
-                if use_basic or use_high:
+                if use_basic or use_high or do_adaptive:
                     cv_img = None
                     if use_high:
                         if f in self.editor_widget.hq_cache:
@@ -2754,9 +2797,21 @@ class MainWindow(QMainWindow):
                             if cv_img is not None:
                                 cv_img = enhance_score_image(cv_img, use_basic=True, use_high=False)
                                 self.editor_widget.basic_cache[f] = cv_img
+                    
+                    if cv_img is None:
+                        cv_img = imread_unicode(f)
                             
                     if cv_img is not None:
                         processed = cv_img
+                        
+                        if do_adaptive:
+                            if len(processed.shape) == 3 and processed.shape[2] == 3:
+                                gray = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
+                            else:
+                                gray = processed
+                            binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 10)
+                            processed = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+
                         if do_invert:
                             processed = cv2.bitwise_not(processed)
                         image_objects.append(Image.fromarray(cv2.cvtColor(processed, cv2.COLOR_BGR2RGB)))

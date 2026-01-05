@@ -1,7 +1,7 @@
 numpy
 opencv-python
-mss
-ImageHash
-Pillow
-PyQt5
-PyQtWebEngine
+opencv-contrib-python
+pillow
+imagehash
+qrcode
+PySide6
