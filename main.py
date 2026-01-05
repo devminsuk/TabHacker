@@ -552,6 +552,63 @@ def enhance_score_image(img_bgr, use_basic=False, use_high=False):
 
     return result_img
 
+def apply_natural_grayscale(img_bgr):
+    """자연스러운 흑백 악보 변환 (스캔 효과)"""
+    if img_bgr is None: return None
+    
+    # 1. 그레이스케일 변환
+    if len(img_bgr.shape) == 3:
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = img_bgr
+
+    h, w = gray.shape[:2]
+    
+    # 2. 슈퍼샘플링 (2배 확대) - 안티앨리어싱
+    if w < 2000:
+        scale_factor = 2.0
+        gray_proc = cv2.resize(gray, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
+    else:
+        scale_factor = 1.0
+        gray_proc = gray
+
+    # 3. 배경 정규화 (조명 보정)
+    h_proc, w_proc = gray_proc.shape[:2]
+    k_size = min(h_proc, w_proc) // 2
+    if k_size % 2 == 0: k_size += 1
+    k_size = max(101, min(k_size, 255)) # 커널 크기 제한
+
+    blur = cv2.GaussianBlur(gray_proc, (k_size, k_size), 0)
+    divided = cv2.divide(gray_proc, blur, scale=255)
+
+    # 4. 강력한 선명화 (Strong Sharpening)
+    # sigma=1.0으로 디테일 살리고, 가중치 2.0/-1.0으로 대비 극대화
+    sharpen_blur = cv2.GaussianBlur(divided, (0, 0), 1.0) 
+    sharpened = cv2.addWeighted(divided, 2.0, sharpen_blur, -1.0, 0)
+
+    # 5. 레벨 조정 (High Contrast & Vivid)
+    # Min: 30 (검은색 기준점), Max: 230 (흰색 기준점)
+    # Gamma: 1.5 (중간톤을 어둡게 하여 글씨/선을 진하게 만듦)
+    min_val = 30
+    max_val = 230
+    gamma = 1.5
+    
+    lut = np.arange(256, dtype=np.float32)
+    lut = (lut - min_val) / (max_val - min_val + 1e-5)
+    lut = np.clip(lut, 0, 1)
+    lut = lut ** gamma * 255.0
+    lut = np.clip(lut, 0, 255).astype(np.uint8)
+    
+    processed = cv2.LUT(sharpened, lut)
+
+    # 6. 다운샘플링 (원래 크기로 복귀)
+    if scale_factor > 1.0:
+        final_gray = cv2.resize(processed, (w, h), interpolation=cv2.INTER_AREA)
+    else:
+        final_gray = processed
+
+    return cv2.cvtColor(final_gray, cv2.COLOR_GRAY2BGR)
+
 def cv2_to_qpixmap(img_cv):
     """OpenCV 이미지를 QPixmap으로 변환"""
     if img_cv is None:
@@ -934,12 +991,7 @@ class DraggableScrollArea(QScrollArea):
         if image_data is not None:
             img = image_data
             if adaptive:
-                if len(img.shape) == 3 and img.shape[2] == 3:
-                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                else:
-                    gray = img
-                binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 10)
-                img = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+                img = apply_natural_grayscale(img)
 
             if invert:
                 img = cv2.bitwise_not(img)
@@ -951,12 +1003,7 @@ class DraggableScrollArea(QScrollArea):
                     img = enhance_score_image(img, use_basic=use_basic, use_high=use_high)
                 
                 if adaptive:
-                    if len(img.shape) == 3 and img.shape[2] == 3:
-                        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                    else:
-                        gray = img
-                    binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 10)
-                    img = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+                    img = apply_natural_grayscale(img)
 
                 if invert:
                     img = cv2.bitwise_not(img)
@@ -1150,7 +1197,7 @@ class ScoreEditorWidget(QWidget):
         self.chk_invert.setChecked(False)
         self.chk_invert.stateChanged.connect(self.refresh_preview)
         
-        self.chk_adaptive = QCheckBox("적응형 이진화")
+        self.chk_adaptive = QCheckBox("자연스러운 흑백 (스캔 효과)")
         self.chk_adaptive.setChecked(False)
         self.chk_adaptive.stateChanged.connect(self.refresh_preview)
 
@@ -1609,12 +1656,7 @@ class ScoreEditorWidget(QWidget):
                 if img_cv is None: continue
                 
                 if is_adaptive:
-                    if len(img_cv.shape) == 3 and img_cv.shape[2] == 3:
-                        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-                    else:
-                        gray = img_cv
-                    binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 10)
-                    img_cv = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+                    img_cv = apply_natural_grayscale(img_cv)
 
                 if is_invert:
                     img_cv = cv2.bitwise_not(img_cv)
@@ -2805,12 +2847,7 @@ class MainWindow(QMainWindow):
                         processed = cv_img
                         
                         if do_adaptive:
-                            if len(processed.shape) == 3 and processed.shape[2] == 3:
-                                gray = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
-                            else:
-                                gray = processed
-                            binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 10)
-                            processed = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+                            processed = apply_natural_grayscale(processed)
 
                         if do_invert:
                             processed = cv2.bitwise_not(processed)
@@ -2856,13 +2893,13 @@ class MainWindow(QMainWindow):
             composer = metadata.get('composer', '').strip()
             bpm = metadata.get('bpm', '').strip()
             
+            header_offset = 0
             if title or composer or bpm:
                 draw = ImageDraw.Draw(current_page)
                 title_font = get_pil_font(FONT_BOLD_PATH, int(base_width/30))
                 comp_font = get_pil_font(FONT_REGULAR_PATH, int(base_width/60))
                 bpm_font = get_pil_font(FONT_BOLD_PATH, int(base_width/60))
                 
-                header_offset = 0
                 if title:
                     tw, th = get_text_size(draw, title, title_font)
                     draw.text(((base_width - tw) / 2, current_y), title, fill=text_fill_color, font=title_font)
