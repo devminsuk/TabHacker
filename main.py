@@ -3017,26 +3017,30 @@ class MainWindow(QMainWindow):
                 
             final_pages.append(current_page)
 
-            if page_num_pos != "없음":
-                draw_font = get_pil_font(FONT_REGULAR_PATH, max(14, int(base_width/50)))
+            # 페이지 번호 및 워터마크 추가
+            draw_font = get_pil_font(FONT_REGULAR_PATH, max(14, int(base_width/50)))
+            watermark_font = get_pil_font(FONT_REGULAR_PATH, max(12, int(base_width/80)))
+            watermark_text = "Captured by ScoreCapturePro"
+            watermark_color = (80, 80, 80) if do_invert else (200, 200, 200)
 
-                for i, page in enumerate(final_pages, 1):
-                    draw = ImageDraw.Draw(page)
+            for i, page in enumerate(final_pages, 1):
+                draw = ImageDraw.Draw(page)
+                
+                # 페이지 번호
+                if page_num_pos != "없음":
                     text = f"{i} / {len(final_pages)}"
                     text_w, text_h = get_text_size(draw, text, draw_font)
-                    
-                    x_pos, y_pos = 0, 0
                     if page_num_pos == "하단 중앙":
-                        x_pos = (base_width - text_w) // 2
-                        y_pos = page_height - margin // 2 - text_h
+                        draw.text(((base_width - text_w) // 2, page_height - margin // 2 - text_h), text, fill=text_fill_color, font=draw_font)
                     elif page_num_pos == "하단 우측":
-                        x_pos = base_width - margin - text_w
-                        y_pos = page_height - margin // 2 - text_h
+                        draw.text((base_width - margin - text_w, page_height - margin // 2 - text_h), text, fill=text_fill_color, font=draw_font)
                     elif page_num_pos == "상단 우측":
-                        x_pos = base_width - margin - text_w
-                        y_pos = margin // 2
-                        
-                    draw.text((x_pos, y_pos), text, fill=text_fill_color, font=draw_font)
+                        draw.text((base_width - margin - text_w, margin // 2), text, fill=text_fill_color, font=draw_font)
+
+                # 워터마크
+                wm_w, wm_h = get_text_size(draw, watermark_text, watermark_font)
+                wm_padding = int(base_width * 0.015)
+                draw.text((base_width - wm_padding - wm_w, page_height - wm_padding - wm_h), watermark_text, fill=watermark_color, font=watermark_font)
 
             if ext == ".pdf":
                 final_pages[0].save(path, save_all=True, append_images=final_pages[1:])
