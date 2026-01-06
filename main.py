@@ -348,7 +348,18 @@ def grab_screen_area(x, y, w, h):
     screens = QApplication.screens()
     target_rect = QRect(x, y, w, h)
     
-    res_pixmap = QPixmap(w, h)
+    # 캡처 영역의 중심이 있는 화면의 DPR을 구함 (HiDPI 지원)
+    center = target_rect.center()
+    target_screen = screens[0]
+    for screen in screens:
+        if screen.geometry().contains(center):
+            target_screen = screen
+            break
+    dpr = target_screen.devicePixelRatio()
+
+    # 물리 픽셀 크기로 Pixmap 생성 후 DPR 설정 (고해상도 유지)
+    res_pixmap = QPixmap(int(w * dpr), int(h * dpr))
+    res_pixmap.setDevicePixelRatio(dpr)
     res_pixmap.fill(Qt.black)
     
     painter = QPainter(res_pixmap)
@@ -3096,6 +3107,9 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == "__main__":
+    if hasattr(Qt, 'HighDpiScaleFactorRoundingPolicy'):
+        QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+
     app = QApplication(sys.argv)
     
     window = MainWindow()
