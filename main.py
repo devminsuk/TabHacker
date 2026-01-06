@@ -1667,7 +1667,7 @@ class ScoreEditorWidget(QWidget):
             final_header_height = max(header_offset, qr_height_val)
             
             if final_header_height > 0:
-                current_y += final_header_height + (60 * enhance_ratio)
+                current_y += final_header_height + (30 * enhance_ratio)
 
             # 이미지 배치
             content_width_pdf = base_width - (margin * 2)
@@ -2951,7 +2951,7 @@ class MainWindow(QMainWindow):
                 try:
                     qr_fill = "white" if do_invert else "black"
                     qr_back = "black" if do_invert else "white"
-                    qr = qrcode.QRCode(box_size=10, border=2)
+                    qr = qrcode.QRCode(box_size=10, border=0)
                     qr.add_data(url)
                     qr.make(fit=True)
                     qr_img = qr.make_image(fill_color=qr_fill, back_color=qr_back).convert("RGB")
@@ -2998,7 +2998,7 @@ class MainWindow(QMainWindow):
 
             final_header_height = max(header_offset, qr_height_val)
             if final_header_height > 0:
-                current_y += final_header_height + int(100 * enhance_ratio)
+                current_y += final_header_height + int(40 * enhance_ratio)
 
             for img in image_objects:
                 if img.width != content_width:
