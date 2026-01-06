@@ -3118,6 +3118,17 @@ if __name__ == "__main__":
         QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
 
     app = QApplication(sys.argv)
+
+    # --- 중복 실행 방지 로직 ---
+    shared_memory = QSharedMemory("ScoreCapturePro_Instance_Lock")
+    if not shared_memory.create(1):
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setWindowTitle("알림")
+        msg.setText("프로그램이 이미 실행 중입니다.")
+        msg.exec()
+        sys.exit(0)
+
     if os.path.exists(ICON_PATH):
         app.setWindowIcon(QIcon(ICON_PATH))
     
