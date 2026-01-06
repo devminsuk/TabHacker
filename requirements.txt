@@ -5,3 +5,4 @@ pillow
 imagehash
 qrcode
 PySide6
+pyinstaller

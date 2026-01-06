@@ -18,6 +18,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FONT_DIR = os.path.join(BASE_DIR, "fonts")
 FONT_BOLD_PATH = os.path.join(FONT_DIR, "NotoSansKR-Bold.ttf")
 FONT_REGULAR_PATH = os.path.join(FONT_DIR, "NotoSansKR-Regular.ttf")
+ICON_PATH = os.path.join(BASE_DIR, "assets", "icon.ico")
 
 def imread_unicode(path):
     """한글 경로 지원 이미지 읽기"""
@@ -1926,6 +1927,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Score Capture Pro - 화면 악보 자동 캡처")
+        if os.path.exists(ICON_PATH):
+            self.setWindowIcon(QIcon(ICON_PATH))
         self.resize(1200, 700)
         self.capture_area_dict = None
         self.captured_files = []
@@ -3115,6 +3118,8 @@ if __name__ == "__main__":
         QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
 
     app = QApplication(sys.argv)
+    if os.path.exists(ICON_PATH):
+        app.setWindowIcon(QIcon(ICON_PATH))
     
     window = MainWindow()
     window.show()
