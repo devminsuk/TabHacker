@@ -1085,21 +1085,31 @@ class ImageEnhancerWorker(QObject):
     progress = Signal(int)
     finished = Signal(dict)
     
-    def __init__(self, files, use_basic=False, use_high=False):
+    def __init__(self, files, use_basic=False, use_high=False, cache_dir=None):
         super().__init__()
         self.files = files
         self.use_basic = use_basic
         self.use_high = use_high
+        self.cache_dir = cache_dir
         self.is_running = True
 
     def run(self):
         results = {}
+        cache_type = 'hq' if self.use_high else 'basic'
         for i, path in enumerate(self.files):
             if not self.is_running: break
             img = imread_unicode(path)
             if img is not None:
                 res = enhance_score_image(img, use_basic=self.use_basic, use_high=self.use_high)
-                results[path] = res
+                if self.cache_dir:
+                    base_name = os.path.basename(path)
+                    name, ext = os.path.splitext(base_name)
+                    cached_filename = f"{name}_{cache_type}{ext}"
+                    cached_path = os.path.join(self.cache_dir, cached_filename)
+                    if imwrite_unicode(cached_path, res):
+                        results[path] = cached_path
+                else:
+                    results[path] = res
             self.progress.emit(i + 1)
         self.finished.emit(results)
 
@@ -1118,6 +1128,11 @@ class ScoreEditorWidget(QWidget):
         self.basic_cache = {}
         self.font_bold = "Arial"
         self.font_regular = "Arial"
+        
+        # 캐시 디렉토리 설정
+        self.cache_dir = os.path.join(OUTPUT_FOLDER, "cache")
+        if not os.path.exists(self.cache_dir):
+            os.makedirs(self.cache_dir)
         
         self.debounce_timer = QTimer()
         self.debounce_timer.setSingleShot(True)
@@ -1325,6 +1340,21 @@ class ScoreEditorWidget(QWidget):
     def clear_image_cache(self):
         self.hq_cache = {}
         self.basic_cache = {}
+        if os.path.exists(self.cache_dir):
+            try:
+                shutil.rmtree(self.cache_dir)
+                os.makedirs(self.cache_dir)
+            except: pass
+
+    def _save_to_cache(self, img, original_path, cache_type):
+        if img is None: return None
+        base_name = os.path.basename(original_path)
+        name, ext = os.path.splitext(base_name)
+        cached_filename = f"{name}_{cache_type}{ext}"
+        cached_path = os.path.join(self.cache_dir, cached_filename)
+        if imwrite_unicode(cached_path, img):
+            return cached_path
+        return None
 
     def reset_fields(self):
         self.title_edit.clear()
@@ -1352,18 +1382,16 @@ class ScoreEditorWidget(QWidget):
             use_basic = self.chk_enhance.isChecked()
             use_high = self.chk_high_quality.isChecked()
             adaptive = self.chk_adaptive.isChecked()
-            img_data = None
             
+            cached_path = None
             if use_high and path in self.hq_cache:
-                img_data = self.hq_cache[path]
+                cached_path = self.hq_cache[path]
             elif use_basic and path in self.basic_cache:
-                img_data = self.basic_cache[path]
+                cached_path = self.basic_cache[path]
             
-            if img_data is not None:
-                # 이미 화질 개선된 데이터이므로 옵션은 False로 전달
-                dlg = ImageDetailDialog(path, use_basic=False, invert=invert, parent=self, image_data=img_data, adaptive=adaptive)
+            if cached_path:
+                dlg = ImageDetailDialog(cached_path, use_basic=False, invert=invert, parent=self, image_data=None, adaptive=adaptive)
             else:
-                # 캐시가 없으면 기존 방식대로
                 dlg = ImageDetailDialog(path, use_basic=use_basic, invert=invert, parent=self, use_high=use_high, adaptive=adaptive)
             dlg.exec()
 
@@ -1393,7 +1421,7 @@ class ScoreEditorWidget(QWidget):
         self.progress_dlg.setValue(0)
         
         self.worker_thread = QThread()
-        self.worker = ImageEnhancerWorker(files, use_basic=self.chk_enhance.isChecked(), use_high=self.chk_high_quality.isChecked())
+        self.worker = ImageEnhancerWorker(files, use_basic=self.chk_enhance.isChecked(), use_high=self.chk_high_quality.isChecked(), cache_dir=self.cache_dir)
         self.worker.moveToThread(self.worker_thread)
         
         self.worker_thread.started.connect(self.worker.run)
@@ -1644,20 +1672,24 @@ class ScoreEditorWidget(QWidget):
                 img_cv = None
                 if self.chk_high_quality.isChecked():
                     if path in self.hq_cache:
-                        img_cv = self.hq_cache[path]
+                        img_cv = imread_unicode(self.hq_cache[path])
                     else:
                         raw_img = imread_unicode(path)
                         if raw_img is not None:
                             img_cv = enhance_score_image(raw_img, use_basic=False, use_high=True)
-                            self.hq_cache[path] = img_cv
+                            cached_path = self._save_to_cache(img_cv, path, 'hq')
+                            if cached_path:
+                                self.hq_cache[path] = cached_path
                 elif self.chk_enhance.isChecked():
                     if path in self.basic_cache:
-                        img_cv = self.basic_cache[path]
+                        img_cv = imread_unicode(self.basic_cache[path])
                     else:
                         raw_img = imread_unicode(path)
                         if raw_img is not None:
                             img_cv = enhance_score_image(raw_img, use_basic=True, use_high=False)
-                            self.basic_cache[path] = img_cv
+                            cached_path = self._save_to_cache(img_cv, path, 'basic')
+                            if cached_path:
+                                self.basic_cache[path] = cached_path
                 
                 if img_cv is None:
                     img_cv = imread_unicode(path)
@@ -2842,20 +2874,24 @@ class MainWindow(QMainWindow):
                     cv_img = None
                     if use_high:
                         if f in self.editor_widget.hq_cache:
-                            cv_img = self.editor_widget.hq_cache[f]
+                            cv_img = imread_unicode(self.editor_widget.hq_cache[f])
                         else:
                             cv_img = imread_unicode(f)
                             if cv_img is not None:
                                 cv_img = enhance_score_image(cv_img, use_basic=False, use_high=True)
-                                self.editor_widget.hq_cache[f] = cv_img
+                                cached_path = self.editor_widget._save_to_cache(cv_img, f, 'hq')
+                                if cached_path:
+                                    self.editor_widget.hq_cache[f] = cached_path
                     elif use_basic:
                         if f in self.editor_widget.basic_cache:
-                            cv_img = self.editor_widget.basic_cache[f]
+                            cv_img = imread_unicode(self.editor_widget.basic_cache[f])
                         else:
                             cv_img = imread_unicode(f)
                             if cv_img is not None:
                                 cv_img = enhance_score_image(cv_img, use_basic=True, use_high=False)
-                                self.editor_widget.basic_cache[f] = cv_img
+                                cached_path = self.editor_widget._save_to_cache(cv_img, f, 'basic')
+                                if cached_path:
+                                    self.editor_widget.basic_cache[f] = cached_path
                     
                     if cv_img is None:
                         cv_img = imread_unicode(f)
