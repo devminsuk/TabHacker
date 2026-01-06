@@ -683,15 +683,12 @@ def calculate_ssim(img1, img2):
     ssim_map = (t1 * t2) / (t3 * t4)
     return ssim_map.mean()
 
-def get_pil_font(path, size, fallback="arial.ttf"):
+def get_pil_font(path, size):
     """PIL 폰트 로드 헬퍼"""
     try:
         return ImageFont.truetype(path, size=size)
     except IOError:
-        try:
-            return ImageFont.truetype(fallback, size=size)
-        except:
-            return ImageFont.load_default()
+        return ImageFont.load_default()
 
 def get_text_size(draw, text, font):
     """Pillow 버전 호환 텍스트 크기 계산"""
@@ -2877,8 +2874,20 @@ class MainWindow(QMainWindow):
                     if do_invert:
                         img = ImageOps.invert(img)
                     image_objects.append(img)
-            
-            base_width = image_objects[0].width
+
+            # 기준 해상도 보정 (최소 A4 300DPI 수준 확보)
+            original_width = image_objects[0].width
+            min_width = 2480  # A4 @ 300DPI width
+
+            if original_width < min_width:
+                scale_ratio = min_width / original_width
+                base_width = min_width
+                margin = int(margin * scale_ratio)
+                spacing = int(spacing * scale_ratio)
+                enhance_ratio *= scale_ratio
+            else:
+                base_width = original_width
+
             page_height = int(base_width * (297 / 210))
             
             # 여백을 고려한 콘텐츠 너비
@@ -2923,26 +2932,26 @@ class MainWindow(QMainWindow):
                 if title:
                     tw, th = get_text_size(draw, title, title_font)
                     draw.text(((base_width - tw) / 2, current_y), title, fill=text_fill_color, font=title_font)
-                    header_offset += th + (20 * enhance_ratio)
+                    header_offset += th + int(20 * enhance_ratio)
                 
                 if composer:
                     cw, ch = get_text_size(draw, composer, comp_font)
                     draw.text((base_width - margin - cw, current_y + header_offset), composer, fill=text_fill_color, font=comp_font)
-                    header_offset += ch + (20 * enhance_ratio)
+                    header_offset += ch + int(20 * enhance_ratio)
                 
                 if bpm:
                     bpm_text = f"BPM: {bpm}"
                     bw, bh = get_text_size(draw, bpm_text, bpm_font)
                     
                     if qr_height_val > 0 and header_offset < qr_height_val:
-                        header_offset = qr_height_val + (10 * enhance_ratio)
+                        header_offset = qr_height_val + int(10 * enhance_ratio)
                         
                     draw.text((margin, current_y + header_offset), bpm_text, fill=text_fill_color, font=bpm_font)
-                    header_offset += bh + (10 * enhance_ratio)
+                    header_offset += bh + int(10 * enhance_ratio)
 
             final_header_height = max(header_offset, qr_height_val)
             if final_header_height > 0:
-                current_y += final_header_height + (100 * enhance_ratio)
+                current_y += final_header_height + int(100 * enhance_ratio)
 
             for img in image_objects:
                 if img.width != content_width:
