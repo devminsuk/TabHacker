@@ -19,6 +19,8 @@ FONT_DIR = os.path.join(BASE_DIR, "fonts")
 FONT_BOLD_PATH = os.path.join(FONT_DIR, "NotoSansKR-Bold.ttf")
 FONT_REGULAR_PATH = os.path.join(FONT_DIR, "NotoSansKR-Regular.ttf")
 ICON_PATH = os.path.join(BASE_DIR, "assets", "icon.ico")
+SUN_ICON_PATH = os.path.join(BASE_DIR, "assets", "sun.svg")
+MOON_ICON_PATH = os.path.join(BASE_DIR, "assets", "moon.svg")
 
 def imread_unicode(path):
     """한글 경로 지원 이미지 읽기"""
@@ -40,10 +42,39 @@ def imwrite_unicode(path, img):
         return False
     except Exception:
         return False
+    
+def get_system_theme():
+    """시스템 다크모드 설정 감지"""
+    try:
+        # Windows
+        if sys.platform == "win32":
+            import winreg
+            try:
+                registry = winreg.ConnectRegistry(None, winreg.HKEY_CURRENT_USER)
+                key = winreg.OpenKey(registry, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+                value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+                winreg.CloseKey(key)
+                return "light" if value == 1 else "dark"
+            except:
+                return "light"
+        # macOS
+        elif sys.platform == "darwin":
+            import subprocess
+            try:
+                result = subprocess.run(['defaults', 'read', '-g', 'AppleInterfaceStyle'], 
+                                      capture_output=True, text=True)
+                return "dark" if "Dark" in result.stdout else "light"
+            except:
+                return "light"
+        # Linux
+        else:
+            return "light"
+    except:
+        return "light"
 
 # UI 스타일시트
-DEFAULT_STYLE = """
-/* 메인 윈도우 및 다이얼로그 (다크모드 대응) */
+LIGHT_STYLE = """
+/* 메인 윈도우 및 다이얼로그 */
 QMainWindow, QDialog {
     background-color: #f5f5f5;
 }
@@ -117,6 +148,7 @@ QComboBox QAbstractItemView {
 /* 체크박스 */
 QCheckBox {
     spacing: 5px;
+    color: #333333;
 }
 
 QCheckBox::indicator:unchecked:hover {
@@ -180,7 +212,7 @@ QPushButton#captureButton:pressed {
     background-color: #1e7e34;
 }
 
-/* 캡처 중지 버튼 (활성화 시) */
+/* 캡처 중지 버튼 */
 QPushButton#captureButtonActive {
     background-color: #dc3545;
     color: #ffffff;
@@ -212,21 +244,6 @@ QPushButton#pdfButton:hover {
 
 QPushButton#pdfButton:pressed {
     background-color: #cc7000;
-}
-
-/* 삭제 버튼 */
-QPushButton#deleteButton {
-    background-color: #6c757d;
-    color: #ffffff;
-    padding: 6px 12px;
-}
-
-QPushButton#deleteButton:hover {
-    background-color: #5a6268;
-}
-
-QPushButton#deleteButton:pressed {
-    background-color: #545b62;
 }
 
 QFrame#listContainer {
@@ -282,10 +299,41 @@ QLabel#statusLabel {
 }
 
 QLabel#previewLabel {
-    background-color: #fafafa;
-    border: 1px solid #d0d0d0;
-    border-radius: 4px;
+    background-color: #e0e0e0;
+    border: 2px dashed #aaaaaa;
+    border-radius: 10px;
     padding: 6px;
+    font-size: 14px;
+    color: #666666;
+}
+
+/* 테마 버튼 */
+QPushButton#themeButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 16px;
+    font-size: 20px;
+    margin: 0px;
+}
+QPushButton#themeButton:hover {
+    background-color: rgba(0, 0, 0, 0.06);
+}
+
+/* 미니 모드 스타일 오버라이드 */
+QFrame#leftPanel[miniMode="true"] {
+    border: none;
+}
+
+QLabel#statusLabel[miniMode="true"] {
+    padding: 0px 4px;
+    font-size: 11px;
+}
+
+QLabel#miniPreviewLabel {
+    background-color: #f0f0f0;
+    color: #666666;
+    border-radius: 4px;
+    border: 1px solid #d0d0d0;
 }
 
 QLabel#headerLabel {
@@ -341,6 +389,361 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
 QFrame#leftPanel {
     background-color: #f5f5f5;
     border-right: 1px solid #d0d0d0;
+}
+
+/* 슬라이더 */
+QSlider::groove:horizontal {
+    background: #d0d0d0;
+    height: 4px;
+    border-radius: 2px;
+}
+
+QSlider::handle:horizontal {
+    background: #0078d4;
+    width: 14px;
+    margin: -5px 0;
+    border-radius: 7px;
+}
+
+QSlider::handle:horizontal:hover {
+    background: #106ebe;
+}
+"""
+
+DARK_STYLE = """
+/* 메인 윈도우 및 다이얼로그 */
+QMainWindow, QDialog {
+    background-color: #1e1e1e;
+}
+
+QWidget {
+    font-family: 'Segoe UI', 'Apple SD Gothic Neo', sans-serif;
+    font-size: 12px;
+    color: #e0e0e0;
+}
+
+/* 그룹박스 */
+QGroupBox {
+    background-color: #2d2d2d;
+    border: 1px solid #3d3d3d;
+    border-radius: 6px;
+    margin-top: 6px;
+    padding-top: 14px;
+    font-weight: 600;
+    font-size: 11px;
+    color: #e0e0e0;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 3px 10px;
+    color: #e0e0e0;
+}
+
+/* 입력 필드 */
+QLineEdit {
+    background-color: #2d2d2d;
+    border: 1px solid #3d3d3d;
+    border-radius: 4px;
+    padding: 6px 10px;
+    color: #e0e0e0;
+    font-size: 12px;
+}
+
+QLineEdit:focus {
+    border: 1px solid #0078d4;
+    background-color: #2d2d2d;
+}
+
+QLineEdit::placeholder {
+    color: #808080;
+}
+
+/* 콤보박스 */
+QComboBox {
+    background-color: #2d2d2d;
+    border: 1px solid #3d3d3d;
+    border-radius: 4px;
+    padding: 4px 10px;
+    color: #e0e0e0;
+}
+
+QComboBox:hover {
+    border: 1px solid #0078d4;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #2d2d2d;
+    color: #e0e0e0;
+    selection-background-color: #0078d4;
+    selection-color: #ffffff;
+    border: 1px solid #3d3d3d;
+    outline: none;
+}
+
+/* 체크박스 */
+QCheckBox {
+    spacing: 5px;
+    color: #e0e0e0;
+}
+
+QCheckBox::indicator:unchecked:hover {
+    border: 1px solid #606060;
+    background-color: #3d3d3d;
+    border-radius: 2px;
+}
+
+/* 기본 버튼 */
+QPushButton {
+    background-color: #0078d4;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 14px;
+    color: #ffffff;
+    font-weight: 600;
+    font-size: 12px;
+}
+
+QPushButton:hover {
+    background-color: #106ebe;
+}
+
+QPushButton:pressed {
+    background-color: #005a9e;
+}
+
+QPushButton:disabled {
+    background-color: #3d3d3d;
+    color: #808080;
+}
+
+/* 영역 선택 버튼 */
+QPushButton#selectButton {
+    background-color: #6a5acd;
+    color: #ffffff;
+}
+
+QPushButton#selectButton:hover {
+    background-color: #5b4ab8;
+}
+
+QPushButton#selectButton:pressed {
+    background-color: #4c3ba3;
+}
+
+/* 캡처 시작 버튼 */
+QPushButton#captureButton {
+    background-color: #28a745;
+    color: #ffffff;
+    font-size: 13px;
+    padding: 10px 14px;
+    font-weight: 700;
+}
+
+QPushButton#captureButton:hover {
+    background-color: #218838;
+}
+
+QPushButton#captureButton:pressed {
+    background-color: #1e7e34;
+}
+
+/* 캡처 중지 버튼 */
+QPushButton#captureButtonActive {
+    background-color: #dc3545;
+    color: #ffffff;
+    font-size: 13px;
+    padding: 10px 14px;
+    font-weight: 700;
+}
+
+QPushButton#captureButtonActive:hover {
+    background-color: #c82333;
+}
+
+QPushButton#captureButtonActive:pressed {
+    background-color: #bd2130;
+}
+
+/* PDF 생성 버튼 */
+QPushButton#pdfButton {
+    background-color: #ff8c00;
+    color: #ffffff;
+    font-size: 13px;
+    padding: 10px 14px;
+    font-weight: 700;
+}
+
+QPushButton#pdfButton:hover {
+    background-color: #e67e00;
+}
+
+QPushButton#pdfButton:pressed {
+    background-color: #cc7000;
+}
+
+QFrame#listContainer {
+    border: 1px solid #3d3d3d;
+    border-radius: 4px;
+    background-color: #2d2d2d;
+}
+
+/* 리스트 위젯 */
+QListWidget {
+    background-color: transparent;
+    border: none;
+    padding: 3px;
+    color: #e0e0e0;
+    outline: none;
+}
+
+QListWidget::item {
+    background-color: #2d2d2d;
+    border-radius: 3px;
+    padding: 3px 8px;
+    margin: 1px;
+    border: 1px solid #3d3d3d;
+    color: #e0e0e0;
+}
+
+QListWidget::item:selected {
+    background-color: #0078d4;
+    color: #ffffff;
+    border: 1px solid #0078d4;
+}
+
+QListWidget::item:hover {
+    background-color: #3d3d3d;
+    border: 1px solid #0078d4;
+    color: #e0e0e0;
+}
+
+QListWidget::item:selected:hover {
+    background-color: #106ebe;
+    color: #ffffff;
+}
+
+/* 라벨 */
+QLabel#statusLabel {
+    background-color: #2d2d2d;
+    border: 1px solid #3d3d3d;
+    border-radius: 4px;
+    padding: 8px;
+    font-weight: 600;
+    color: #e0e0e0;
+    font-size: 11px;
+}
+
+QLabel#previewLabel {
+    background-color: #2d2d2d;
+    border: 2px dashed #606060;
+    border-radius: 10px;
+    padding: 6px;
+    font-size: 14px;
+    color: #a0a0a0;
+}
+
+/* 테마 버튼 */
+QPushButton#themeButton {
+    background-color: transparent;
+    border: none;
+    border-radius: 16px;
+    font-size: 20px;
+    margin: 0px;
+}
+QPushButton#themeButton:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* 미니 모드 스타일 오버라이드 */
+QFrame#leftPanel[miniMode="true"] {
+    border: none;
+}
+
+QLabel#statusLabel[miniMode="true"] {
+    padding: 0px 4px;
+    font-size: 11px;
+}
+
+QLabel#miniPreviewLabel {
+    background-color: #2d2d2d;
+    color: #a0a0a0;
+    border-radius: 4px;
+    border: 1px solid #3d3d3d;
+}
+
+QLabel#headerLabel {
+    font-size: 16px;
+    font-weight: 700;
+    color: #e0e0e0;
+    padding: 6px 0px;
+}
+
+QLabel#sectionLabel {
+    font-size: 11px;
+    font-weight: 600;
+    color: #a0a0a0;
+    padding: 4px 0px;
+}
+
+/* 스플리터 */
+QSplitter::handle {
+    background-color: #3d3d3d;
+    width: 1px;
+}
+
+QSplitter::handle:hover {
+    background-color: #0078d4;
+}
+
+/* 스크롤바 */
+QScrollBar:vertical {
+    background: #2d2d2d;
+    width: 8px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical {
+    background: #606060;
+    border-radius: 4px;
+    min-height: 20px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #808080;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+/* 프레임 */
+QFrame#leftPanel {
+    background-color: #1e1e1e;
+    border-right: 1px solid #3d3d3d;
+}
+
+/* 슬라이더 */
+QSlider::groove:horizontal {
+    background: #3d3d3d;
+    height: 4px;
+    border-radius: 2px;
+}
+
+QSlider::handle:horizontal {
+    background: #0078d4;
+    width: 14px;
+    margin: -5px 0;
+    border-radius: 7px;
+}
+
+QSlider::handle:horizontal:hover {
+    background: #106ebe;
 }
 """
 
@@ -1962,6 +2365,7 @@ class MainWindow(QMainWindow):
 
         self.capture_timer = QTimer(self)
         self.capture_timer.timeout.connect(self.perform_capture)
+        self.current_theme = get_system_theme()  # 'light' 또는 'dark'
 
         self.countdown_value = -1
         self.current_scroll_chunks = [] # UI 표시용 청크 리스트
@@ -2055,7 +2459,24 @@ class MainWindow(QMainWindow):
                 if families: self.font_regular_family = families[0]
 
     def apply_stylesheet(self):
-        self.setStyleSheet(DEFAULT_STYLE)
+        """현재 테마에 맞는 스타일시트 적용"""
+        self.setStyleSheet(DARK_STYLE if self.current_theme == "dark" else LIGHT_STYLE)
+
+    def toggle_theme(self):
+        """테마 토글 (라이트 ↔ 다크)"""
+        self.current_theme = "dark" if self.current_theme == "light" else "light"
+        
+        # 버튼 아이콘 변경
+        self.update_theme_icon()
+        
+        # 스타일시트 적용
+        self.apply_stylesheet()
+
+    def update_theme_icon(self):
+        """현재 테마에 맞는 SVG 아이콘 설정"""
+        icon_path = SUN_ICON_PATH if self.current_theme == "light" else MOON_ICON_PATH
+        self.btn_theme.setIcon(QIcon(icon_path))
+        self.btn_theme.setIconSize(QSize(20, 20))
 
     def setup_ui(self):
         central_widget = QWidget()
@@ -2082,6 +2503,14 @@ class MainWindow(QMainWindow):
         header_label = QLabel("Score Capture Pro")
         header_label.setObjectName("headerLabel")
         
+        # 테마 토글 버튼 추가
+        self.btn_theme = QPushButton()
+        self.btn_theme.setObjectName("themeButton")
+        self.btn_theme.setFixedSize(32, 32)
+        self.update_theme_icon()
+        self.btn_theme.setToolTip("테마 전환 (라이트/다크)")
+        self.btn_theme.clicked.connect(self.toggle_theme)
+        
         self.btn_mini = QPushButton("미니모드")
         self.btn_mini.setCheckable(True)
         self.btn_mini.setFixedSize(80, 32)
@@ -2090,6 +2519,8 @@ class MainWindow(QMainWindow):
 
         header_layout.addWidget(header_label)
         header_layout.addStretch()
+        header_layout.addWidget(self.btn_theme)
+        header_layout.addSpacing(5)
         header_layout.addWidget(self.btn_mini)
         left_layout.addWidget(header_widget)
         
@@ -2240,9 +2671,9 @@ class MainWindow(QMainWindow):
 
         # 미니 모드용 미리보기 (초기엔 숨김)
         self.mini_preview_label = QLabel()
+        self.mini_preview_label.setObjectName("miniPreviewLabel")
         self.mini_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.mini_preview_label.setMinimumHeight(150)
-        self.mini_preview_label.setStyleSheet("background-color: #f0f0f0; color: #666; border-radius: 4px; border: 1px solid #d0d0d0;")
         self.mini_preview_label.hide()
         left_layout.addWidget(self.mini_preview_label)
 
@@ -2273,7 +2704,6 @@ class MainWindow(QMainWindow):
         self.image_preview_label = QLabel("영역을 선택하고 캡처를 시작하세요.\n캡처된 이미지가 여기에 표시됩니다.")
         self.image_preview_label.setObjectName("previewLabel")
         self.image_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_preview_label.setStyleSheet("background-color: #e0e0e0; border: 2px dashed #aaa; border-radius: 10px; font-size: 14px; color: #666;")
         self.image_preview_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         
         preview_layout.addWidget(QLabel("현재 캡처 미리보기", styleSheet="font-weight:bold; font-size:14px;"))
@@ -2324,6 +2754,10 @@ class MainWindow(QMainWindow):
 
     def toggle_mini_mode(self, checked):
         left_panel = self.findChild(QFrame, "leftPanel")
+        
+        # 스타일 업데이트를 위한 속성 설정
+        if left_panel: left_panel.setProperty("miniMode", checked)
+        self.status_label.setProperty("miniMode", checked)
 
         self.buttons_layout.setDirection(QBoxLayout.Direction.LeftToRight if checked else QBoxLayout.Direction.TopToBottom)
 
@@ -2335,7 +2769,6 @@ class MainWindow(QMainWindow):
             self.chk_always_on_top.hide()
             
             if left_panel:
-                left_panel.setStyleSheet("QFrame#leftPanel { border: none; background-color: #f5f5f5; }")
                 left_panel.setMaximumWidth(16777215)
                 left_panel.setMinimumWidth(0)
                 if left_panel.layout():
@@ -2351,7 +2784,7 @@ class MainWindow(QMainWindow):
             self.btn_pdf.setText("3. 편집 및 저장")
             self.status_label.setFixedHeight(28)
             self.status_label.setWordWrap(False)
-            self.status_label.setStyleSheet("QLabel#statusLabel { padding: 0px 4px; font-size: 11px; background-color: #ffffff; border: 1px solid #d0d0d0; border-radius: 4px; color: #333333; }")
+            
             self.show()
             self.raise_()
             self.activateWindow()
@@ -2363,7 +2796,6 @@ class MainWindow(QMainWindow):
             self.chk_always_on_top.show()
             
             if left_panel:
-                left_panel.setStyleSheet("")
                 left_panel.setMaximumWidth(320)
                 left_panel.setMinimumWidth(300)
                 if left_panel.layout():
@@ -2383,13 +2815,19 @@ class MainWindow(QMainWindow):
             self.status_label.setMinimumHeight(32)
             self.status_label.setMaximumHeight(16777215)
             self.status_label.setWordWrap(True)
-            self.status_label.setStyleSheet("")
 
         self.update_ui_state()
         self.show()
         self.raise_()
         self.activateWindow()
         self.update_mini_preview()
+        
+        # 스타일 강제 업데이트 (속성 변경 반영)
+        if left_panel:
+            self.style().unpolish(left_panel)
+            self.style().polish(left_panel)
+        self.style().unpolish(self.status_label)
+        self.style().polish(self.status_label)
 
     def toggle_always_on_top(self, state):
         pos = self.pos()
@@ -3160,7 +3598,7 @@ class MainWindow(QMainWindow):
             msg.setWindowTitle(msg_title)
             msg.setText(msg_text)
             msg.setIcon(QMessageBox.Icon.Information)
-            msg.setStyleSheet(DEFAULT_STYLE)
+            msg.setStyleSheet(self.styleSheet())
             msg.exec()
             self.switch_to_capture()
             
