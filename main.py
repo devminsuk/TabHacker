@@ -496,7 +496,7 @@ class CaptureAreaIndicator(QWidget):
     def __init__(self, x, y, w, h, parent=None):
         super().__init__(parent)
         self.setGeometry(x, y, w, h)
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Window)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)  # 마우스 이벤트를 통과시킴
         self.border_color = QColor(0, 255, 0)  # 기본: 초록색
