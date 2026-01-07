@@ -4,7 +4,7 @@ from PySide6.QtWidgets import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
 
-# --- 설정 ---
+# 기본 설정
 OUTPUT_FOLDER = os.path.join(tempfile.gettempdir(), f"ScoreCapturePro_{os.getpid()}")  # 임시 폴더 경로
 DEFAULT_SENSITIVITY = "0.9"        # 이미지 변화 감지 민감도 (SSIM 임계값)
 DEFAULT_DELAY = "3"                # 캡처 시작 전 카운트다운 (초)
@@ -13,7 +13,7 @@ DEFAULT_SPACING = "40"             # PDF 생성 시 이미지 간 간격 (px)
 DEFAULT_OPACITY = 100              # 프로그램 창 기본 투명도 (100 = 불투명)
 MIN_OPACITY = 20                   # 프로그램 창 최소 투명도
 
-# --- 폰트 설정 ---
+# 리소스 경로
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FONT_DIR = os.path.join(BASE_DIR, "fonts")
 FONT_BOLD_PATH = os.path.join(FONT_DIR, "NotoSansKR-Bold.ttf")
@@ -41,8 +41,8 @@ def imwrite_unicode(path, img):
     except Exception:
         return False
 
-# --- 프로페셔널 스타일시트 ---
-MODERN_STYLESHEET = """
+# UI 스타일시트
+DEFAULT_STYLE = """
 /* 메인 윈도우 및 다이얼로그 (다크모드 대응) */
 QMainWindow, QDialog {
     background-color: #f5f5f5;
@@ -2055,7 +2055,7 @@ class MainWindow(QMainWindow):
                 if families: self.font_regular_family = families[0]
 
     def apply_stylesheet(self):
-        self.setStyleSheet(MODERN_STYLESHEET)
+        self.setStyleSheet(DEFAULT_STYLE)
 
     def setup_ui(self):
         central_widget = QWidget()
@@ -3160,7 +3160,7 @@ class MainWindow(QMainWindow):
             msg.setWindowTitle(msg_title)
             msg.setText(msg_text)
             msg.setIcon(QMessageBox.Icon.Information)
-            msg.setStyleSheet(MODERN_STYLESHEET)
+            msg.setStyleSheet(DEFAULT_STYLE)
             msg.exec()
             self.switch_to_capture()
             
@@ -3204,7 +3204,7 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
 
-    # --- 중복 실행 방지 로직 ---
+    # 중복 실행 방지 로직
     shared_memory = QSharedMemory("ScoreCapturePro_Instance_Lock")
     if not shared_memory.create(1):
         msg = QMessageBox()
