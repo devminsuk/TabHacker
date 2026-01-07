@@ -2875,13 +2875,6 @@ class MainWindow(QMainWindow):
             bg_color = "black" if do_invert else "white"
             text_fill_color = "white" if do_invert else "black"
 
-            # 화질 개선 시 여백/간격도 2배로 조정하여 비율 유지
-            enhance_ratio = 1
-            if use_basic or use_high:
-                margin *= 2
-                spacing *= 2
-                enhance_ratio = 2
-
             image_objects = []
             for f in files:
                 if use_basic or use_high or do_adaptive:
@@ -2925,18 +2918,38 @@ class MainWindow(QMainWindow):
                         img = ImageOps.invert(img)
                     image_objects.append(img)
 
+            if not image_objects:
+                self.status_label.setText("처리할 이미지가 없습니다.")
+                return
+
+            # 원본 이미지 너비 확인 (비율 계산용)
+            raw_width = 1000
+            if files and os.path.exists(files[0]):
+                try:
+                    with Image.open(files[0]) as tmp:
+                        raw_width = tmp.width
+                except: pass
+
             # 기준 해상도 보정 (최소 A4 300DPI 수준 확보)
-            original_width = image_objects[0].width
+            current_width = image_objects[0].width
+            
+            # 1. 처리(업스케일링)에 따른 스케일 계산
+            processing_scale = current_width / raw_width if raw_width > 0 else 1.0
+            
+            margin = int(margin * processing_scale)
+            spacing = int(spacing * processing_scale)
+
             min_width = 2480  # A4 @ 300DPI width
 
-            if original_width < min_width:
-                scale_ratio = min_width / original_width
-                base_width = min_width
-                margin = int(margin * scale_ratio)
-                spacing = int(spacing * scale_ratio)
-                enhance_ratio *= scale_ratio
-            else:
-                base_width = original_width
+            # 항상 A4 300DPI 너비로 고정 (일관된 출력 크기)
+            base_width = min_width
+            final_scale = min_width / current_width
+            
+            margin = int(margin * final_scale)
+            spacing = int(spacing * final_scale)
+            
+            # 패딩/오프셋 계산용 통합 비율
+            enhance_ratio = processing_scale * final_scale
 
             page_height = int(base_width * (297 / 210))
             
