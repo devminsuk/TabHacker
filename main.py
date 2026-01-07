@@ -1201,10 +1201,12 @@ class ScoreEditorWidget(QWidget):
         settings_form.setSpacing(10)
         
         self.margin_edit = QLineEdit(DEFAULT_MARGIN)
-        self.margin_edit.setValidator(QIntValidator(0, 200, self))
+        self.margin_edit.setValidator(QIntValidator(0, 9999, self))
+        self.margin_edit.editingFinished.connect(self.validate_margin)
         self.margin_edit.setMinimumHeight(30)
         self.spacing_edit = QLineEdit(DEFAULT_SPACING)
-        self.spacing_edit.setValidator(QIntValidator(0, 200, self))
+        self.spacing_edit.setValidator(QIntValidator(0, 9999, self))
+        self.spacing_edit.editingFinished.connect(self.validate_spacing)
         self.spacing_edit.setMinimumHeight(30)
         
         self.page_num_pos = QComboBox()
@@ -1330,6 +1332,26 @@ class ScoreEditorWidget(QWidget):
         btn_layout.addWidget(self.btn_save, 1)
         
         main_layout.addLayout(btn_layout)
+
+    def validate_margin(self):
+        try:
+            text = self.margin_edit.text()
+            val = int(text) if text else -1
+            if not (0 <= val <= 200):
+                raise ValueError
+        except ValueError:
+            QMessageBox.warning(self, "입력 오류", "여백은 0 ~ 200px 사이여야 합니다.\n기본값(60)으로 초기화됩니다.")
+            self.margin_edit.setText(DEFAULT_MARGIN)
+
+    def validate_spacing(self):
+        try:
+            text = self.spacing_edit.text()
+            val = int(text) if text else -1
+            if not (0 <= val <= 200):
+                raise ValueError
+        except ValueError:
+            QMessageBox.warning(self, "입력 오류", "간격은 0 ~ 200px 사이여야 합니다.\n기본값(40)으로 초기화됩니다.")
+            self.spacing_edit.setText(DEFAULT_SPACING)
 
     def set_font_families(self, bold_family, regular_family):
         self.font_bold = bold_family
@@ -2089,16 +2111,18 @@ class MainWindow(QMainWindow):
         settings_h = QHBoxLayout()
         settings_h.addWidget(QLabel("민감도:"))
         self.sensitivity_input = QLineEdit(DEFAULT_SENSITIVITY)
-        sens_validator = QDoubleValidator(0.0, 1.0, 2, self)
+        sens_validator = QDoubleValidator(0.0, 9999.0, 2, self)
         sens_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
         self.sensitivity_input.setValidator(sens_validator)
+        self.sensitivity_input.editingFinished.connect(self.validate_sensitivity)
         self.sensitivity_input.setMaximumWidth(50)
         self.sensitivity_input.setMinimumHeight(28)
         settings_h.addWidget(self.sensitivity_input)
         
         settings_h.addWidget(QLabel("딜레이:"))
         self.delay_input = QLineEdit(DEFAULT_DELAY)
-        self.delay_input.setValidator(QIntValidator(0, 60, self))
+        self.delay_input.setValidator(QIntValidator(0, 9999, self))
+        self.delay_input.editingFinished.connect(self.validate_delay)
         self.delay_input.setMaximumWidth(50)
         self.delay_input.setMinimumHeight(28)
         settings_h.addWidget(self.delay_input)
@@ -2277,6 +2301,26 @@ class MainWindow(QMainWindow):
         splitter.setSizes([300, 1000])
         
         main_layout.addWidget(splitter)
+
+    def validate_sensitivity(self):
+        try:
+            text = self.sensitivity_input.text()
+            val = float(text) if text else -1.0
+            if not (0.0 <= val <= 1.0):
+                raise ValueError
+        except ValueError:
+            QMessageBox.warning(self, "입력 오류", "민감도는 0.0 ~ 1.0 사이여야 합니다.\n기본값(0.9)으로 초기화됩니다.")
+            self.sensitivity_input.setText(DEFAULT_SENSITIVITY)
+
+    def validate_delay(self):
+        try:
+            text = self.delay_input.text()
+            val = int(text) if text else -1
+            if not (0 <= val <= 60):
+                raise ValueError
+        except ValueError:
+            QMessageBox.warning(self, "입력 오류", "딜레이는 0 ~ 60초 사이여야 합니다.\n기본값(3)으로 초기화됩니다.")
+            self.delay_input.setText(DEFAULT_DELAY)
 
     def toggle_mini_mode(self, checked):
         left_panel = self.findChild(QFrame, "leftPanel")
