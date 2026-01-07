@@ -2286,6 +2286,7 @@ class MainWindow(QMainWindow):
             self.capture_group.hide()
             self.mini_preview_label.show()
             self.btn_mini.setText("일반모드")
+            self.chk_always_on_top.hide()
             
             if left_panel:
                 left_panel.setStyleSheet("QFrame#leftPanel { border: none; background-color: #f5f5f5; }")
@@ -2295,8 +2296,11 @@ class MainWindow(QMainWindow):
                     left_panel.layout().setContentsMargins(5, 5, 5, 5)
 
             self.setFixedSize(320, 460)
-            self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.CustomizeWindowHint | 
-                              Qt.WindowType.WindowTitleHint | Qt.WindowType.WindowCloseButtonHint | Qt.WindowType.WindowMinimizeButtonHint)
+            flags = Qt.WindowType.Window | Qt.WindowType.CustomizeWindowHint | \
+                    Qt.WindowType.WindowTitleHint | Qt.WindowType.WindowCloseButtonHint | \
+                    Qt.WindowType.WindowMinimizeButtonHint
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+            self.setWindowFlags(flags)
             
             self.btn_pdf.setText("3. 편집 및 저장")
             self.status_label.setFixedHeight(28)
@@ -2310,6 +2314,7 @@ class MainWindow(QMainWindow):
             self.capture_group.show()
             self.mini_preview_label.hide()
             self.btn_mini.setText("미니모드")
+            self.chk_always_on_top.show()
             
             if left_panel:
                 left_panel.setStyleSheet("")
@@ -2341,14 +2346,23 @@ class MainWindow(QMainWindow):
         self.update_mini_preview()
 
     def toggle_always_on_top(self, state):
+        pos = self.pos()
+        self.hide()
+
+        is_checked = (state == Qt.CheckState.Checked.value)
+
         if self.btn_mini.isChecked():
-            return # 미니모드는 이미 항상 위에 표시됨
-        
-        flags = Qt.WindowType.Window
-        if state == Qt.CheckState.Checked.value:
+            flags = Qt.WindowType.Window | Qt.WindowType.CustomizeWindowHint | \
+                    Qt.WindowType.WindowTitleHint | Qt.WindowType.WindowCloseButtonHint | \
+                    Qt.WindowType.WindowMinimizeButtonHint
+        else:
+            flags = Qt.WindowType.Window
+
+        if is_checked:
             flags |= Qt.WindowType.WindowStaysOnTopHint
 
         self.setWindowFlags(flags)
+        self.move(pos)
         self.show()
         self.raise_()
         self.activateWindow()
