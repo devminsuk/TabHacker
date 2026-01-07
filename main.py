@@ -1200,11 +1200,11 @@ class ScoreEditorWidget(QWidget):
         settings_form = QFormLayout()
         settings_form.setSpacing(10)
         
-        self.margin_edit = QLineEdit("60")
         self.margin_edit = QLineEdit(DEFAULT_MARGIN)
+        self.margin_edit.setValidator(QIntValidator(0, 200, self))
         self.margin_edit.setMinimumHeight(30)
-        self.spacing_edit = QLineEdit("40")
         self.spacing_edit = QLineEdit(DEFAULT_SPACING)
+        self.spacing_edit.setValidator(QIntValidator(0, 200, self))
         self.spacing_edit.setMinimumHeight(30)
         
         self.page_num_pos = QComboBox()
@@ -2088,15 +2088,17 @@ class MainWindow(QMainWindow):
         # 설정 (가로 배치)
         settings_h = QHBoxLayout()
         settings_h.addWidget(QLabel("민감도:"))
-        self.sensitivity_input = QLineEdit("0.9")
         self.sensitivity_input = QLineEdit(DEFAULT_SENSITIVITY)
+        sens_validator = QDoubleValidator(0.0, 1.0, 2, self)
+        sens_validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+        self.sensitivity_input.setValidator(sens_validator)
         self.sensitivity_input.setMaximumWidth(50)
         self.sensitivity_input.setMinimumHeight(28)
         settings_h.addWidget(self.sensitivity_input)
         
         settings_h.addWidget(QLabel("딜레이:"))
-        self.delay_input = QLineEdit("3")
         self.delay_input = QLineEdit(DEFAULT_DELAY)
+        self.delay_input.setValidator(QIntValidator(0, 60, self))
         self.delay_input.setMaximumWidth(50)
         self.delay_input.setMinimumHeight(28)
         settings_h.addWidget(self.delay_input)
@@ -2474,7 +2476,16 @@ class MainWindow(QMainWindow):
         if not os.path.exists(OUTPUT_FOLDER):
             os.makedirs(OUTPUT_FOLDER)
 
-        self.countdown_value = int(self.delay_input.text())
+        try:
+            float(self.sensitivity_input.text())
+        except ValueError:
+            self.sensitivity_input.setText(DEFAULT_SENSITIVITY)
+
+        try:
+            self.countdown_value = int(self.delay_input.text())
+        except ValueError:
+            self.countdown_value = int(DEFAULT_DELAY)
+            self.delay_input.setText(DEFAULT_DELAY)
         self.run_countdown()
 
     def run_countdown(self):
@@ -2616,7 +2627,10 @@ class MainWindow(QMainWindow):
             
             # 워커 스레드로 처리 위임
             mode = self.mode_combo.currentIndex()
-            sensitivity = float(self.sensitivity_input.text())
+            try:
+                sensitivity = float(self.sensitivity_input.text())
+            except ValueError:
+                sensitivity = float(DEFAULT_SENSITIVITY)
             self.sig_process_frame.emit(img_bgr, mode, sensitivity)
             
         except Exception as e:
