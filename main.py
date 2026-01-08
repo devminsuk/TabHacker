@@ -3639,7 +3639,7 @@ class MainWindow(QMainWindow):
             msg.setIcon(QMessageBox.Icon.Information)
             msg.setStyleSheet(self.styleSheet())
             msg.exec()
-            self.switch_to_capture()
+            #self.switch_to_capture()
             
         except Exception as e:
             self.status_label.setText(f"저장 실패")
