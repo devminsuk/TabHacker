@@ -3095,7 +3095,7 @@ class MainWindow(QMainWindow):
             if is_scroll_mode and self.area_indicator:
                 self.area_indicator.hide()
                 QApplication.processEvents()
-                time.sleep(0.25)
+                time.sleep(0.2)
 
             # 화면 캡처 (Global Coordinates)
             pixmap = grab_screen_area(self.capture_area_dict['left'], self.capture_area_dict['top'], w, h)
@@ -3134,7 +3134,7 @@ class MainWindow(QMainWindow):
         if self.area_indicator:
             self.area_indicator.hide()
             QApplication.processEvents()
-            time.sleep(0.15)
+            time.sleep(0.1)
 
         pixmap_clean = grab_screen_area(self.capture_area_dict['left'], self.capture_area_dict['top'], 
                                        self.capture_area_dict['width'], self.capture_area_dict['height'])
