@@ -1558,12 +1558,31 @@ class ScoreEditorWidget(QWidget):
         
         # 메인 레이아웃 (세로 배치)
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(20, 20, 20, 10)
+        main_layout.setContentsMargins(20, 5, 20, 10)
         main_layout.setSpacing(10)
 
+        # 설정 접기/펴기 버튼
+        self.btn_toggle_settings = QPushButton("▼ 설정 접기")
+        self.btn_toggle_settings.setCheckable(True)
+        self.btn_toggle_settings.setChecked(True)
+        self.btn_toggle_settings.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_toggle_settings.setStyleSheet("""
+            QPushButton {
+                text-align: left;
+                background-color: transparent;
+                border: none;
+                font-weight: bold;
+                color: #0078d4;
+                padding: 5px;
+            }
+            QPushButton:hover { background-color: rgba(0, 120, 212, 0.1); border-radius: 4px; }
+        """)
+        self.btn_toggle_settings.toggled.connect(self.toggle_settings_visibility)
+        main_layout.addWidget(self.btn_toggle_settings)
+
         # --- 상단 설정 영역 (가로 배치) ---
-        settings_container = QWidget()
-        settings_layout = QHBoxLayout(settings_container)
+        self.settings_container = QWidget()
+        settings_layout = QHBoxLayout(self.settings_container)
         settings_layout.setContentsMargins(0, 0, 0, 0)
         settings_layout.setSpacing(20)
 
@@ -1661,7 +1680,7 @@ class ScoreEditorWidget(QWidget):
         self.spacing_edit.textChanged.connect(self.trigger_refresh)
         self.page_num_pos.currentIndexChanged.connect(self.refresh_preview)
 
-        main_layout.addWidget(settings_container)
+        main_layout.addWidget(self.settings_container)
 
         # --- 중앙 미리보기 영역 ---
         preview_frame = QFrame()
@@ -1738,6 +1757,10 @@ class ScoreEditorWidget(QWidget):
         btn_layout.addWidget(self.btn_save, 1)
         
         main_layout.addLayout(btn_layout)
+
+    def toggle_settings_visibility(self, checked):
+        self.settings_container.setVisible(checked)
+        self.btn_toggle_settings.setText("▼ 설정 접기" if checked else "▶ 설정 펼치기")
 
     def validate_margin(self):
         try:
