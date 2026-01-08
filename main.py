@@ -19,8 +19,11 @@ FONT_DIR = os.path.join(BASE_DIR, "fonts")
 FONT_BOLD_PATH = os.path.join(FONT_DIR, "NotoSansKR-Bold.ttf")
 FONT_REGULAR_PATH = os.path.join(FONT_DIR, "NotoSansKR-Regular.ttf")
 ICON_PATH = os.path.join(BASE_DIR, "assets", "icon.ico")
+ICON_PNG_PATH = os.path.join(BASE_DIR, "assets", "icon.png")
 SUN_ICON_PATH = os.path.join(BASE_DIR, "assets", "sun.svg")
 MOON_ICON_PATH = os.path.join(BASE_DIR, "assets", "moon.svg")
+COMPACT_ICON_PATH = os.path.join(BASE_DIR, "assets", "compact.svg")
+EXPAND_ICON_PATH = os.path.join(BASE_DIR, "assets", "expand.svg")
 
 def imread_unicode(path):
     """한글 경로 지원 이미지 읽기"""
@@ -340,7 +343,7 @@ QLabel#headerLabel {
     font-size: 16px;
     font-weight: 700;
     color: #2c2c2c;
-    padding: 6px 0px;
+    padding: 0px 0px 3px 0px;
 }
 
 QLabel#sectionLabel {
@@ -677,7 +680,7 @@ QLabel#headerLabel {
     font-size: 16px;
     font-weight: 700;
     color: #e0e0e0;
-    padding: 6px 0px;
+    padding: 0px 0px 3px 0px;
 }
 
 QLabel#sectionLabel {
@@ -2396,6 +2399,7 @@ class MainWindow(QMainWindow):
             self.last_system_theme = sys_theme
             self.current_theme = sys_theme
             self.update_theme_icon()
+            self.update_mode_icon()
             self.apply_stylesheet()
 
     def update_ui_state(self):
@@ -2484,6 +2488,7 @@ class MainWindow(QMainWindow):
         
         # 버튼 아이콘 변경
         self.update_theme_icon()
+        self.update_mode_icon()
         
         # 스타일시트 적용
         self.apply_stylesheet()
@@ -2493,6 +2498,35 @@ class MainWindow(QMainWindow):
         icon_path = SUN_ICON_PATH if self.current_theme == "light" else MOON_ICON_PATH
         self.btn_theme.setIcon(QIcon(icon_path))
         self.btn_theme.setIconSize(QSize(20, 20))
+
+    def create_colored_icon(self, path, color):
+        if not os.path.exists(path):
+            return QIcon()
+        
+        with open(path, 'r', encoding='utf-8') as f:
+            svg_content = f.read()
+        
+        svg_content = svg_content.replace("currentColor", color)
+        pixmap = QPixmap()
+        pixmap.loadFromData(QByteArray(svg_content.encode('utf-8')))
+        return QIcon(pixmap)
+
+    def update_mode_icon(self):
+        """현재 모드에 맞는 SVG 아이콘 설정"""
+        is_mini = self.btn_mini.isChecked()
+        icon_path = EXPAND_ICON_PATH if is_mini else COMPACT_ICON_PATH
+        tooltip = "일반 모드로 전환" if is_mini else "미니 모드로 전환"
+        
+        # 테마에 따른 색상 설정
+        color = "#333333" if self.current_theme == "light" else "#e0e0e0"
+        self.btn_mini.setIcon(self.create_colored_icon(icon_path, color))
+        self.btn_mini.setIconSize(QSize(20, 20))
+        self.btn_mini.setToolTip(tooltip)
+
+    def toggle_mini_mode_with_icon(self, checked):
+        """아이콘 업데이트를 포함한 미니모드 토글"""
+        self.update_mode_icon()
+        self.toggle_mini_mode(checked)
 
     def setup_ui(self):
         central_widget = QWidget()
@@ -2513,31 +2547,54 @@ class MainWindow(QMainWindow):
         # 헤더
         header_widget = QWidget()
         header_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(0, 0, 0, 0)
+        self.header_layout = QHBoxLayout(header_widget)
+        self.header_layout.setContentsMargins(0, 0, 0, 0)
+        self.header_layout.setSpacing(4)
+
+        # 로고 아이콘 추가
+        logo_path = ICON_PNG_PATH if os.path.exists(ICON_PNG_PATH) else ICON_PATH
+        if os.path.exists(logo_path):
+            logo_lbl = QLabel()
+            logo_lbl.setObjectName("logoLabel")
+            pm = QPixmap(logo_path)
+            if not pm.isNull():
+                logo_lbl.setPixmap(pm.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                logo_lbl.setFixedSize(24, 24)
+                self.header_layout.addWidget(logo_lbl)
 
         header_label = QLabel("Score Capture Pro")
         header_label.setObjectName("headerLabel")
+        self.header_layout.addWidget(header_label)
         
-        # 테마 토글 버튼 추가
+        self.header_layout.addStretch()
+
+        # 버튼 컨테이너 (아이콘 버튼들)
+        button_container = QWidget()
+        button_layout = QHBoxLayout(button_container)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setSpacing(4)
+
+        # 테마 토글 버튼
         self.btn_theme = QPushButton()
         self.btn_theme.setObjectName("themeButton")
         self.btn_theme.setFixedSize(32, 32)
         self.update_theme_icon()
         self.btn_theme.setToolTip("테마 전환 (라이트/다크)")
         self.btn_theme.clicked.connect(self.toggle_theme)
-        
-        self.btn_mini = QPushButton("미니모드")
-        self.btn_mini.setCheckable(True)
-        self.btn_mini.setFixedSize(80, 32)
-        self.btn_mini.setStyleSheet("font-size: 12px; background-color: #666; color: white; border-radius: 3px; padding: 0px;")
-        self.btn_mini.clicked.connect(self.toggle_mini_mode)
 
-        header_layout.addWidget(header_label)
-        header_layout.addStretch()
-        header_layout.addWidget(self.btn_theme)
-        header_layout.addSpacing(5)
-        header_layout.addWidget(self.btn_mini)
+        # 미니모드 토글 버튼 (아이콘 버전)
+        self.btn_mini = QPushButton()
+        self.btn_mini.setObjectName("themeButton")  # 동일한 스타일 적용
+        self.btn_mini.setCheckable(True)
+        self.btn_mini.setFixedSize(32, 32)
+        self.update_mode_icon()
+        self.btn_mini.clicked.connect(self.toggle_mini_mode_with_icon)
+
+        button_layout.addWidget(self.btn_theme)
+        button_layout.addWidget(self.btn_mini)
+
+        self.header_layout.addWidget(button_container)
+
         left_layout.addWidget(header_widget)
         
         # 2. 설정 + 제어 통합
@@ -2781,7 +2838,6 @@ class MainWindow(QMainWindow):
             self.right_stack.hide()
             self.capture_group.hide()
             self.mini_preview_label.show()
-            self.btn_mini.setText("일반모드")
             self.chk_always_on_top.hide()
             
             if left_panel:
@@ -2789,6 +2845,9 @@ class MainWindow(QMainWindow):
                 left_panel.setMinimumWidth(0)
                 if left_panel.layout():
                     left_panel.layout().setContentsMargins(5, 5, 5, 5)
+
+            if hasattr(self, 'header_layout'):
+                self.header_layout.setContentsMargins(5, 2, 5, 2)
 
             self.setFixedSize(320, 460)
             flags = Qt.WindowType.Window | Qt.WindowType.CustomizeWindowHint | \
@@ -2800,15 +2859,10 @@ class MainWindow(QMainWindow):
             self.btn_pdf.setText("3. 편집 및 저장")
             self.status_label.setFixedHeight(28)
             self.status_label.setWordWrap(False)
-            
-            self.show()
-            self.raise_()
-            self.activateWindow()
         else:
             self.right_stack.show()
             self.capture_group.show()
             self.mini_preview_label.hide()
-            self.btn_mini.setText("미니모드")
             self.chk_always_on_top.show()
             
             if left_panel:
@@ -2817,6 +2871,9 @@ class MainWindow(QMainWindow):
                 if left_panel.layout():
                     left_panel.layout().setContentsMargins(10, 10, 10, 10)
             
+            if hasattr(self, 'header_layout'):
+                self.header_layout.setContentsMargins(0, 0, 0, 0)
+
             self.setMinimumSize(1000, 600)
             self.setMaximumSize(16777215, 16777215)
             self.resize(1200, 700)
@@ -2833,6 +2890,7 @@ class MainWindow(QMainWindow):
             self.status_label.setWordWrap(True)
 
         self.update_ui_state()
+        self.update_mode_icon()
         self.show()
         self.raise_()
         self.activateWindow()
