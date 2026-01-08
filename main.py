@@ -3545,9 +3545,16 @@ class MainWindow(QMainWindow):
 
             # 페이지 번호 및 워터마크 추가
             draw_font = get_pil_font(FONT_REGULAR_PATH, max(14, int(base_width/50)))
-            watermark_font = get_pil_font(FONT_REGULAR_PATH, max(12, int(base_width/80)))
-            watermark_text = "Captured by ScoreCapturePro"
-            watermark_color = (80, 80, 80) if do_invert else (200, 200, 200)
+            
+            # 워터마크 설정
+            watermark_font = get_pil_font(FONT_BOLD_PATH, max(20, int(base_width/60)))
+            watermark_text = "SCORE CAPTURE PRO"
+            
+            # 투명도를 위한 색상 설정 (RGBA)
+            if do_invert:
+                wm_color = (255, 255, 255, 50)  # 다크모드: 흰색 투명
+            else:
+                wm_color = (0, 0, 0, 40)        # 라이트모드: 검은색 투명
 
             for i, page in enumerate(final_pages, 1):
                 draw = ImageDraw.Draw(page)
@@ -3565,8 +3572,24 @@ class MainWindow(QMainWindow):
 
                 # 워터마크
                 wm_w, wm_h = get_text_size(draw, watermark_text, watermark_font)
-                wm_padding = int(base_width * 0.015)
-                draw.text((base_width - wm_padding - wm_w, page_height - wm_padding - wm_h), watermark_text, fill=watermark_color, font=watermark_font)
+                
+                # 텍스트를 그릴 투명 레이어 생성
+                txt_layer = Image.new('RGBA', (wm_w + 20, wm_h + 30), (0,0,0,0))
+                d_txt = ImageDraw.Draw(txt_layer)
+                d_txt.text((10, 10), watermark_text, font=watermark_font, fill=wm_color)
+                
+                # 밑줄 추가
+                line_y = 10 + wm_h + 4
+                line_width = max(2, int(base_width/800))
+                d_txt.line((10, line_y, 10 + wm_w, line_y), fill=wm_color, width=line_width)
+                
+                # 위치 계산 (페이지 번호와 겹치지 않도록 배치)
+                wm_padding = int(base_width * 0.025)
+                x = wm_padding if page_num_pos == "하단 우측" else (base_width - wm_w - wm_padding)
+                y = page_height - wm_h - wm_padding
+                
+                # 원본 페이지에 합성
+                page.paste(txt_layer, (x - 10, y - 10), txt_layer)
 
             if ext == ".pdf":
                 final_pages[0].save(path, save_all=True, append_images=final_pages[1:])
