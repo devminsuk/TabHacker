@@ -2366,6 +2366,7 @@ class MainWindow(QMainWindow):
         self.capture_timer = QTimer(self)
         self.capture_timer.timeout.connect(self.perform_capture)
         self.current_theme = get_system_theme()  # 'light' 또는 'dark'
+        self.last_system_theme = self.current_theme
 
         self.countdown_value = -1
         self.current_scroll_chunks = [] # UI 표시용 청크 리스트
@@ -2381,6 +2382,21 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         self.apply_stylesheet()
         self.setup_worker()
+        
+    def changeEvent(self, event):
+        """시스템 테마 변경 이벤트 감지"""
+        if event.type() == QEvent.ThemeChange:
+            self.watch_system_theme()
+        super().changeEvent(event)
+
+    def watch_system_theme(self):
+        """시스템 테마 변경을 확인하여 반영"""
+        sys_theme = get_system_theme()
+        if sys_theme != self.last_system_theme:
+            self.last_system_theme = sys_theme
+            self.current_theme = sys_theme
+            self.update_theme_icon()
+            self.apply_stylesheet()
 
     def update_ui_state(self):
         """UI 상태(미니모드/캡처중)에 따라 버튼 스타일과 텍스트 업데이트"""
