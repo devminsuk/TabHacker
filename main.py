@@ -3008,6 +3008,9 @@ class MainWindow(QMainWindow):
         self.editor_widget.load_preview(files)
         self.right_stack.setCurrentIndex(1)
         self.status_label.setText("PDF 편집 모드")
+        
+        if self.area_indicator:
+            self.area_indicator.hide()
 
     def switch_to_capture(self):
         """캡처 모드로 복귀"""
@@ -3015,6 +3018,9 @@ class MainWindow(QMainWindow):
         self.status_label.setText("캡처 모드")
         self.btn_select.setEnabled(True)
         self.btn_capture.setEnabled(True)
+        
+        if self.area_indicator and self.capture_area_dict:
+            self.area_indicator.show()
 
     def toggle_capture(self):
         """캡처 시작/중지 토글"""
