@@ -1,4 +1,4 @@
-import sys, os, re, time, qrcode, numpy as np, cv2, imagehash, tempfile, shutil
+import sys, os, re, time, qrcode, numpy as np, cv2, imagehash, tempfile, shutil, ctypes
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
@@ -2509,6 +2509,64 @@ class MainWindow(QMainWindow):
         if self.font_regular_family != "Arial":
             style = style.replace("'Segoe UI', 'Apple SD Gothic Neo', sans-serif", f"'{self.font_regular_family}', sans-serif")
         self.setStyleSheet(style)
+        self.update_title_bar_color()
+
+    def update_title_bar_color(self):
+        """타이틀바 색상 변경"""
+        if sys.platform == "win32":
+            try:
+                from ctypes import windll, c_int, byref, sizeof
+                
+                hwnd = int(self.winId())
+                is_dark = 1 if self.current_theme == "dark" else 0
+                
+                # DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+                windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, 
+                    20, 
+                    byref(c_int(is_dark)), 
+                    sizeof(c_int)
+                )
+            except Exception:
+                pass
+        elif sys.platform == "darwin":
+            try:
+                import ctypes.util
+                
+                libobjc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("objc"))
+                c_void_p = ctypes.c_void_p
+                c_char_p = ctypes.c_char_p
+                
+                objc_getClass = libobjc.objc_getClass
+                objc_getClass.restype = c_void_p
+                objc_getClass.argtypes = [c_char_p]
+                
+                sel_registerName = libobjc.sel_registerName
+                sel_registerName.restype = c_void_p
+                sel_registerName.argtypes = [c_char_p]
+                
+                objc_msgSend = libobjc.objc_msgSend
+                objc_msgSend.restype = c_void_p
+                
+                def _utf8(s): return s.encode('utf-8')
+                
+                ns_view = c_void_p(int(self.winId()))
+                
+                objc_msgSend.argtypes = [c_void_p, c_void_p]
+                ns_window = objc_msgSend(ns_view, sel_registerName(_utf8("window")))
+                
+                if ns_window:
+                    style = "NSAppearanceNameDarkAqua" if self.current_theme == "dark" else "NSAppearanceNameAqua"
+                    
+                    objc_msgSend.argtypes = [c_void_p, c_void_p, c_char_p]
+                    ns_str = objc_msgSend(objc_getClass(_utf8("NSString")), sel_registerName(_utf8("stringWithUTF8String:")), _utf8(style))
+                    
+                    objc_msgSend.argtypes = [c_void_p, c_void_p, c_void_p]
+                    appearance = objc_msgSend(objc_getClass(_utf8("NSAppearance")), sel_registerName(_utf8("appearanceNamed:")), ns_str)
+                    
+                    objc_msgSend(ns_window, sel_registerName(_utf8("setAppearance:")), appearance)
+            except Exception:
+                pass
 
     def toggle_theme(self):
         """테마 토글 (라이트 ↔ 다크)"""
@@ -2923,6 +2981,7 @@ class MainWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
         self.update_mini_preview()
+        self.update_title_bar_color()
         
         # 스타일 강제 업데이트 (속성 변경 반영)
         if left_panel:
@@ -2952,6 +3011,7 @@ class MainWindow(QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
+        self.update_title_bar_color()
 
     def change_opacity(self, value):
         self.setWindowOpacity(value / 100.0)
