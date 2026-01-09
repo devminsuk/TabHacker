@@ -343,7 +343,7 @@ QLabel#headerLabel {
     font-size: 16px;
     font-weight: 700;
     color: #2c2c2c;
-    padding: 0px 0px 3px 0px;
+    padding: 6px 0px;
 }
 
 QLabel#sectionLabel {
@@ -680,7 +680,7 @@ QLabel#headerLabel {
     font-size: 16px;
     font-weight: 700;
     color: #e0e0e0;
-    padding: 0px 0px 3px 0px;
+    padding: 6px 0px;
 }
 
 QLabel#sectionLabel {
@@ -793,8 +793,9 @@ class SelectionOverlay(QWidget):
     selection_finished = Signal(dict) 
     selection_cancelled = Signal()
     
-    def __init__(self, parent=None): 
+    def __init__(self, parent=None, font_family="Segoe UI"): 
         super().__init__(parent)
+        self.font_family = font_family
         # 전체 화면 오버레이 설정
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -890,7 +891,7 @@ class SelectionOverlay(QWidget):
                 
                 # 사이즈 텍스트
                 painter.setPen(Qt.white)
-                font = QFont("Segoe UI", 9, QFont.Bold)
+                font = QFont(self.font_family, 9, QFont.Bold)
                 painter.setFont(font)
                 text = f"{rect.width()} × {rect.height()} px"
                 painter.drawText(rect.topLeft() - QPoint(0, 5), text)
@@ -2503,7 +2504,11 @@ class MainWindow(QMainWindow):
 
     def apply_stylesheet(self):
         """현재 테마에 맞는 스타일시트 적용"""
-        self.setStyleSheet(DARK_STYLE if self.current_theme == "dark" else LIGHT_STYLE)
+        style = DARK_STYLE if self.current_theme == "dark" else LIGHT_STYLE
+        
+        if self.font_regular_family != "Arial":
+            style = style.replace("'Segoe UI', 'Apple SD Gothic Neo', sans-serif", f"'{self.font_regular_family}', sans-serif")
+        self.setStyleSheet(style)
 
     def toggle_theme(self):
         """테마 토글 (라이트 ↔ 다크)"""
@@ -2815,7 +2820,7 @@ class MainWindow(QMainWindow):
         
         self.right_stack.addWidget(self.editor_widget)
 
-        self.overlay = SelectionOverlay()
+        self.overlay = SelectionOverlay(font_family=self.font_bold_family)
         self.overlay.selection_finished.connect(self.finish_selection)
         self.overlay.selection_cancelled.connect(self.on_selection_cancelled)
         
