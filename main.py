@@ -1,4 +1,5 @@
 import sys, os, re, time, qrcode, numpy as np, cv2, imagehash, tempfile, shutil, ctypes
+import traceback
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
@@ -2057,7 +2058,7 @@ class ScoreEditorWidget(QWidget):
                     
                     qr_height_val = qr_size
                 except Exception as e:
-                    print(f"QR Error: {e}")
+                    QMessageBox.warning(self, "QR 코드 오류", f"QR 코드 생성 중 오류가 발생했습니다:\n{e}")
 
             if title or composer or bpm:
                 if title:
@@ -2233,7 +2234,7 @@ class ScoreEditorWidget(QWidget):
                     lbl_num.show()
 
         except Exception as e:
-            print(f"Preview error: {e}")
+            QMessageBox.warning(self, "미리보기 오류", f"미리보기 생성 중 오류가 발생했습니다:\n{e}")
 
 class CaptureWorker(QObject):
     """캡처 및 이미지 처리를 담당하는 워커 스레드"""
@@ -2242,6 +2243,7 @@ class CaptureWorker(QObject):
     image_saved = Signal(str, object)  # filename, img_bgr
     scroll_updated = Signal(object)    # img_bgr
     status_updated = Signal(str)
+    error_occurred = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -2338,7 +2340,7 @@ class CaptureWorker(QObject):
                 
                 self.finished_processing.emit()
         except Exception as e:
-            print(f"Worker Error: {e}")
+            self.error_occurred.emit(f"이미지 처리 오류: {e}")
             self.finished_processing.emit()
 
     def save_clean_image(self, img_bgr):
@@ -2366,7 +2368,7 @@ class CaptureWorker(QObject):
                 self.image_saved.emit(filename, img_bgr)
             
         except Exception as e:
-            print(f"Save Error: {e}")
+            self.error_occurred.emit(f"저장 오류: {e}")
         finally:
             self.finished_processing.emit()
 
@@ -2485,6 +2487,7 @@ class MainWindow(QMainWindow):
         self.worker.image_saved.connect(self.on_image_saved)
         self.worker.scroll_updated.connect(self.on_scroll_updated)
         self.worker.status_updated.connect(self.status_label.setText)
+        self.worker.error_occurred.connect(self.show_error_message)
         
         self.worker_thread.start()
 
@@ -3284,13 +3287,16 @@ class MainWindow(QMainWindow):
             self.sig_process_frame.emit(img_bgr, mode, sensitivity)
             
         except Exception as e:
-            print(f"Capture Error: {e}")
+            QMessageBox.critical(self, "캡처 오류", f"화면 캡처 중 오류가 발생했습니다:\n{e}")
             self.status_label.setText(f"캡처 오류")
             self.is_worker_busy = False
 
     def on_worker_finished(self):
         """워커 처리 완료 시 호출"""
         self.is_worker_busy = False
+
+    def show_error_message(self, message):
+        QMessageBox.warning(self, "오류", message)
 
     def on_request_clean_capture(self):
         """페이지 모드: 변화 감지 시 깨끗한 이미지 캡처 요청"""
@@ -3826,8 +3832,27 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
         QApplication.instance().quit()
 
+def exception_hook(exctype, value, tb):
+    """전역 예외 처리: 프로그램 충돌 시 메시지 박스 표시"""
+    error_msg = "".join(traceback.format_exception(exctype, value, tb))
+    
+    # GUI 애플리케이션이 실행 중이라면 메시지 박스 표시
+    if QApplication.instance():
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setWindowTitle("치명적 오류 발생")
+        msg.setText("예기치 않은 오류가 발생하여 프로그램이 종료됩니다.")
+        msg.setInformativeText(str(value))
+        msg.setDetailedText(error_msg)
+        msg.exec()
+    
+    # 원래의 훅 호출 (콘솔 출력 등) 후 종료
+    sys.__excepthook__(exctype, value, tb)
+    sys.exit(1)
 
 if __name__ == "__main__":
+    sys.excepthook = exception_hook
+
     if hasattr(Qt, 'HighDpiScaleFactorRoundingPolicy'):
         QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
 
