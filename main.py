@@ -47,6 +47,44 @@ def imwrite_unicode(path, img):
     except Exception:
         return False
     
+def cleanup_old_temp_folders():
+    """실행 시 이전 실행에서 남은 임시 폴더 정리"""
+    temp_dir = tempfile.gettempdir()
+    current_pid = os.getpid()
+    
+    try:
+        for name in os.listdir(temp_dir):
+            if name.startswith("ScoreCapturePro_"):
+                folder_path = os.path.join(temp_dir, name)
+                if not os.path.isdir(folder_path):
+                    continue
+                    
+                try:
+                    # 폴더명에서 PID 추출
+                    pid_str = name.replace("ScoreCapturePro_", "")
+                    pid = int(pid_str)
+                    
+                    # 현재 프로세스는 건너뜀
+                    if pid == current_pid:
+                        continue
+                        
+                    # 프로세스 생존 여부 확인
+                    is_running = False
+                    try:
+                        os.kill(pid, 0)
+                        is_running = True
+                    except ProcessLookupError:
+                        is_running = False
+                    except (PermissionError, OSError):
+                        is_running = True
+                    
+                    if not is_running:
+                        shutil.rmtree(folder_path, ignore_errors=True)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
 def get_system_theme():
     """시스템 다크모드 설정 감지"""
     try:
@@ -3826,14 +3864,22 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     # 중복 실행 방지 로직
-    shared_memory = QSharedMemory("ScoreCapturePro_Instance_Lock")
-    if not shared_memory.create(1):
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Icon.Warning)
-        msg.setWindowTitle("알림")
-        msg.setText("프로그램이 이미 실행 중입니다.")
-        msg.exec()
-        sys.exit(0)
+    lock_file_path = os.path.join(tempfile.gettempdir(), "ScoreCapturePro.lock")
+    lock_file = QLockFile(lock_file_path)
+    lock_file.setStaleLockTime(0)
+
+    # 이전 실행 잔재 정리
+    cleanup_old_temp_folders()
+
+    if not lock_file.tryLock(100):
+        # 락 획득 실패 시, 스테일 락(비정상 종료 잔재)인지 확인 후 제거 시도
+        if not lock_file.removeStaleLockFile() or not lock_file.tryLock(100):
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Icon.Warning)
+            msg.setWindowTitle("알림")
+            msg.setText("프로그램이 이미 실행 중입니다.")
+            msg.exec()
+            sys.exit(0)
 
     if os.path.exists(ICON_PATH):
         app.setWindowIcon(QIcon(ICON_PATH))
