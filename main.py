@@ -1325,7 +1325,7 @@ class ScrollSlicerDialog(QDialog):
             self.canvas.set_cut_points(points)
             self.update_slice_count()
         else:
-            self.run_auto_detect()
+            self.clear_all_points()
 
     def eventFilter(self, source, event):
         if event.type() == QEvent.Wheel:
