@@ -1831,8 +1831,6 @@ class ScoreEditorWidget(QWidget):
         self.composer_edit.clear()
         self.bpm_edit.clear()
         self.url_edit.clear()
-        self.margin_edit.setText("60")
-        self.spacing_edit.setText("40")
         self.margin_edit.setText(DEFAULT_MARGIN)
         self.spacing_edit.setText(DEFAULT_SPACING)
         self.page_num_pos.setCurrentIndex(0)
@@ -1954,8 +1952,6 @@ class ScoreEditorWidget(QWidget):
                 margin = int(self.margin_edit.text())
                 spacing = int(self.spacing_edit.text())
             except ValueError:
-                margin = 60
-                spacing = 40
                 margin = int(DEFAULT_MARGIN)
                 spacing = int(DEFAULT_SPACING)
             page_num_pos_str = self.page_num_pos.currentText()
@@ -2950,7 +2946,6 @@ class MainWindow(QMainWindow):
             flags |= Qt.WindowType.WindowStaysOnTopHint
             self.setWindowFlags(flags)
             
-            self.btn_pdf.setText("3. 편집 및 저장")
             self.status_label.setFixedHeight(28)
             self.status_label.setWordWrap(False)
         else:
@@ -2978,7 +2973,6 @@ class MainWindow(QMainWindow):
                 flags |= Qt.WindowType.WindowStaysOnTopHint
             self.setWindowFlags(flags)
             
-            self.btn_pdf.setText("3. 편집 및 저장")
             self.status_label.setMinimumHeight(32)
             self.status_label.setMaximumHeight(16777215)
             self.status_label.setWordWrap(True)
@@ -3508,9 +3502,7 @@ class MainWindow(QMainWindow):
             else:
                 filename_base = title if title else composer
         else:
-            # 유튜브 제목 사용 ( - YouTube 접미사 제거)
-            page_title = "Captured Score"
-            filename_base = page_title.replace(" - YouTube", "") if page_title else "TAB"
+            filename_base = "Captured Score"
             
         # 파일명 특수문자 제거 (윈도우 파일명 금지 문자)
         filename_base = re.sub(r'[\\/*?:"<>|]', "", filename_base).strip()
@@ -3545,13 +3537,9 @@ class MainWindow(QMainWindow):
             
             # 설정값 파싱
             try:
-                margin = int(metadata.get('margin', 60))
-                spacing = int(metadata.get('spacing', 40))
                 margin = int(metadata.get('margin', DEFAULT_MARGIN))
                 spacing = int(metadata.get('spacing', DEFAULT_SPACING))
             except ValueError:
-                margin = 60
-                spacing = 40
                 margin = int(DEFAULT_MARGIN)
                 spacing = int(DEFAULT_SPACING)
             
@@ -3802,7 +3790,6 @@ class MainWindow(QMainWindow):
             msg.setIcon(QMessageBox.Icon.Information)
             msg.setStyleSheet(self.styleSheet())
             msg.exec()
-            #self.switch_to_capture()
             
         except Exception as e:
             self.status_label.setText(f"저장 실패")
