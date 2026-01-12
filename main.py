@@ -1,5 +1,8 @@
 import sys, os, re, time, qrcode, numpy as np, cv2, imagehash, tempfile, shutil, ctypes
 import traceback
+import json
+import webbrowser
+import urllib.request
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
@@ -25,6 +28,26 @@ SUN_ICON_PATH = os.path.join(BASE_DIR, "assets", "sun.svg")
 MOON_ICON_PATH = os.path.join(BASE_DIR, "assets", "moon.svg")
 COMPACT_ICON_PATH = os.path.join(BASE_DIR, "assets", "compact.svg")
 EXPAND_ICON_PATH = os.path.join(BASE_DIR, "assets", "expand.svg")
+
+def load_version_info():
+    """version.json 파일 로드"""
+    json_path = os.path.join(BASE_DIR, "version.json")
+    default_info = {
+        "version": "1.0.0",
+        "developer": "Developer",
+        "github": "",
+        "repo_api_url": ""
+    }
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                default_info.update(data)
+        except Exception:
+            pass
+    return default_info
+
+VERSION_INFO = load_version_info()
 
 def imread_unicode(path):
     """한글 경로 지원 이미지 읽기"""
@@ -2373,6 +2396,81 @@ class CaptureWorker(QObject):
         finally:
             self.finished_processing.emit()
 
+class UpdateChecker(QThread):
+    update_available = Signal(str, str)
+
+    def run(self):
+        api_url = VERSION_INFO.get("repo_api_url")
+        if not api_url:
+            return
+
+        try:
+            req = urllib.request.Request(api_url)
+            req.add_header('User-Agent', 'ScoreCapturePro')
+            with urllib.request.urlopen(req, timeout=5) as response:
+                if response.status == 200:
+                    data = json.loads(response.read().decode())
+                    latest_version = data.get("tag_name", "").lstrip("v")
+                    current_version = VERSION_INFO.get("version", "0.0.0")
+
+                    if self.compare_versions(latest_version, current_version):
+                        self.update_available.emit(latest_version, data.get("html_url", ""))
+        except Exception:
+            pass
+
+    def compare_versions(self, v1, v2):
+        def normalize(v):
+            return [int(x) for x in re.sub(r'[^0-9.]', '', v).split(".") if x.isdigit()]
+        try:
+            return normalize(v1) > normalize(v2)
+        except:
+            return v1 > v2
+
+class AboutDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("정보")
+        self.resize(300, 250)
+        layout = QVBoxLayout(self)
+        
+        # 로고 이미지
+        logo_lbl = QLabel()
+        if os.path.exists(ICON_PNG_PATH):
+            pm = QPixmap(ICON_PNG_PATH)
+            logo_lbl.setPixmap(pm.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        logo_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(logo_lbl)
+        
+        # 제목 및 버전 정보
+        title = QLabel("Score Capture Pro")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; margin-top: 10px;")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+        
+        ver = QLabel(f"Version {VERSION_INFO.get('version', '1.0.0')}")
+        ver.setStyleSheet("color: #888; margin-bottom: 10px;")
+        ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(ver)
+        
+        # 개발자 정보
+        dev = QLabel(f"Developed by {VERSION_INFO.get('developer', '')}")
+        dev.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(dev)
+        
+        # 깃허브 저장소 링크
+        github_url = VERSION_INFO.get('github', '')
+        if github_url:
+            link = QLabel(f'<a href="{github_url}" style="color: #0078d4; text-decoration: none;">GitHub Repository</a>')
+            link.setOpenExternalLinks(True)
+            link.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(link)
+            
+        layout.addStretch()
+            
+        btn_ok = QPushButton("확인")
+        btn_ok.clicked.connect(self.accept)
+        layout.addWidget(btn_ok)
+
 class MainWindow(QMainWindow):
     # 워커 스레드 통신용 시그널
     sig_process_frame = Signal(object, int, float)
@@ -2412,6 +2510,11 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         self.apply_stylesheet()
         self.setup_worker()
+        
+        # 업데이트 확인 (GitHub Releases)
+        self.update_checker = UpdateChecker()
+        self.update_checker.update_available.connect(self.show_update_notification)
+        self.update_checker.start()
         
     def changeEvent(self, event):
         """시스템 테마 변경 이벤트 감지"""
@@ -2869,7 +2972,23 @@ class MainWindow(QMainWindow):
         self.image_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_preview_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         
-        preview_layout.addWidget(QLabel("현재 캡처 미리보기", styleSheet="font-weight:bold; font-size:14px;"))
+        # 헤더 레이아웃 (제목 + 정보 버튼)
+        preview_header = QHBoxLayout()
+        preview_title = QLabel("현재 캡처 미리보기")
+        preview_title.setStyleSheet("font-weight:bold; font-size:14px;")
+        preview_header.addWidget(preview_title)
+        preview_header.addStretch()
+
+        # 정보(About) 버튼
+        self.btn_info = QPushButton()
+        self.btn_info.setObjectName("themeButton")
+        self.btn_info.setFixedSize(32, 32)
+        self.btn_info.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation))
+        self.btn_info.setToolTip("정보")
+        self.btn_info.clicked.connect(self.show_about_dialog)
+        preview_header.addWidget(self.btn_info)
+
+        preview_layout.addLayout(preview_header)
         preview_layout.addWidget(self.image_preview_label, 1)
         
         self.right_stack.addWidget(preview_container)
@@ -3794,6 +3913,19 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.status_label.setText(f"저장 실패")
             QMessageBox.critical(self, "오류", f"파일 저장 실패:\n{e}")
+
+    def show_about_dialog(self):
+        dlg = AboutDialog(self)
+        dlg.exec()
+
+    def show_update_notification(self, version, url):
+        msg = QMessageBox(self)
+        msg.setWindowTitle("업데이트 알림")
+        msg.setText(f"새로운 버전 ({version})이 출시되었습니다.")
+        msg.setInformativeText("업데이트 내용을 확인하고 다운로드하시겠습니까?")
+        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if msg.exec() == QMessageBox.StandardButton.Yes:
+            webbrowser.open(url)
 
     def closeEvent(self, event):
         if self.captured_files and not self.is_saved:
