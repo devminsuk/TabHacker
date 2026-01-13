@@ -40,7 +40,7 @@ jobs:
             --include-data-dir=assets=assets `
             --include-data-file=version.json=version.json `
             --output-filename=ScoreCapturePro.exe `
-            --no-pyi-file main.py
+            main.py
 
       - name: Build with Nuitka (macOS)
         if: matrix.os == 'macos-latest'
@@ -53,7 +53,7 @@ jobs:
             --include-data-dir=assets=assets \
             --include-data-file=version.json=version.json \
             --output-filename=ScoreCapturePro_Mac.bin \
-            --no-pyi-file main.py
+            main.py
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
