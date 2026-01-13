@@ -1731,6 +1731,57 @@ class ImageDetailDialog(QDialog):
         
         apply_window_theme(self, parent)
 
+def create_colored_pixmap(path, color):
+    """SVG 파일의 색상을 변경하여 Pixmap으로 반환"""
+    if not os.path.exists(path):
+        return QPixmap()
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            svg_content = f.read()
+        svg_content = svg_content.replace("currentColor", color)
+        pixmap = QPixmap()
+        pixmap.loadFromData(QByteArray(svg_content.encode('utf-8')))
+        return pixmap
+    except:
+        return QPixmap()
+
+class ListItemDelegate(QStyledItemDelegate):
+    """리스트 햄버거 아이콘 델리게이트"""
+    def paint(self, painter, option, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        
+        opt.text = ""
+        style = opt.widget.style() if opt.widget else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
+        
+        painter.save()
+        
+        if opt.state & QStyle.StateFlag.State_Selected:
+            color = opt.palette.color(QPalette.ColorRole.HighlightedText)
+        else:
+            color = opt.palette.color(QPalette.ColorRole.Text)
+        painter.setPen(color)
+        
+        rect = opt.rect
+        text_rect = rect.adjusted(8, 0, -30, 0)
+        text = index.data(Qt.ItemDataRole.DisplayRole)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, 
+                        opt.fontMetrics.elidedText(text, Qt.TextElideMode.ElideRight, text_rect.width()))
+        
+        x = rect.right() - 22
+        cy = rect.center().y()
+        
+        pen = QPen(color)
+        pen.setWidth(2)
+        painter.setPen(pen)
+        
+        painter.drawLine(x, cy - 4, x + 12, cy - 4)
+        painter.drawLine(x, cy, x + 12, cy)
+        painter.drawLine(x, cy + 4, x + 12, cy + 4)
+            
+        painter.restore()
+
 class ImageEnhancerWorker(QObject):
     progress = Signal(int)
     finished = Signal(dict)
@@ -2804,6 +2855,10 @@ class MainWindow(QMainWindow):
         self.update_checker = UpdateChecker()
         self.update_checker.update_available.connect(self.show_update_notification)
         self.update_checker.start()
+
+        # 리스트 델리게이트 설정
+        self.list_delegate = ListItemDelegate(self.list_widget)
+        self.list_widget.setItemDelegate(self.list_delegate)
         
     def changeEvent(self, event):
         """시스템 테마 변경 이벤트 감지"""
@@ -2970,15 +3025,7 @@ class MainWindow(QMainWindow):
         self.btn_theme.setIconSize(QSize(20, 20))
 
     def create_colored_icon(self, path, color):
-        if not os.path.exists(path):
-            return QIcon()
-        
-        with open(path, 'r', encoding='utf-8') as f:
-            svg_content = f.read()
-        
-        svg_content = svg_content.replace("currentColor", color)
-        pixmap = QPixmap()
-        pixmap.loadFromData(QByteArray(svg_content.encode('utf-8')))
+        pixmap = create_colored_pixmap(path, color)
         return QIcon(pixmap)
 
     def update_mode_icon(self):
