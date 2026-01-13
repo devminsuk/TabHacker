@@ -2732,6 +2732,7 @@ class AboutDialog(QDialog):
         if os.path.exists(target_path):
             pm = QPixmap(target_path)
             self.logo_lbl.setPixmap(pm.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+            self.setWindowIcon(QIcon(target_path))
         
         self.title_lbl.setText(title_text)
 
