@@ -2106,8 +2106,22 @@ class ScoreEditorWidget(QWidget):
         self.render_preview_content()
 
     def run_enhancement_worker(self, files):
-        self.progress_dlg = QProgressDialog("고화질 변환 처리 중... (시간이 걸릴 수 있습니다)", "취소", 0, len(files), self)
-        self.progress_dlg.setWindowTitle("고화질 변환")
+        # 작업 내용에 따른 메시지 생성
+        tasks = []
+        if self.chk_high_quality.isChecked():
+            tasks.append("초고화질 변환")
+        elif self.chk_enhance.isChecked():
+            tasks.append("화질 개선")
+            
+        if self.chk_adaptive.isChecked():
+            tasks.append("스캔 효과")
+        if self.chk_invert.isChecked():
+            tasks.append("색상 반전")
+            
+        msg = f"{', '.join(tasks)} 중... (시간이 걸릴 수 있습니다)" if tasks else "이미지 처리 중..."
+        
+        self.progress_dlg = QProgressDialog(msg, "취소", 0, len(files), self)
+        self.progress_dlg.setWindowTitle("처리 중")
         self.progress_dlg.setWindowModality(Qt.WindowModality.WindowModal)
         self.progress_dlg.setMinimumDuration(0)
         self.progress_dlg.setAutoClose(False)
@@ -2128,8 +2142,30 @@ class ScoreEditorWidget(QWidget):
         self.worker_thread.start()
 
     def cancel_enhancement(self):
-        if hasattr(self, 'worker'):
+        if hasattr(self, 'worker') and self.worker:
             self.worker.stop()
+        
+        thread = getattr(self, 'worker_thread', None)
+
+        if thread and thread.isRunning():
+            # 종료 대기 알림창 표시
+            wait_dlg = QProgressDialog("작업을 취소하고 있습니다...\n잠시만 기다려주세요.", "", 0, 0, self)
+            wait_dlg.setWindowTitle("취소 중")
+            wait_dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
+            wait_dlg.setCancelButton(None)
+            wait_dlg.setWindowFlags(wait_dlg.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint)
+            wait_dlg.setMinimumDuration(0)
+            wait_dlg.setRange(0, 0)
+            apply_window_theme(wait_dlg, self)
+            wait_dlg.show()
+            QApplication.processEvents()
+
+            thread.quit()
+            # 현재 진행 중인 이미지 처리가 끝날 때까지 대기
+            while not thread.wait(50):
+                QApplication.processEvents()
+            wait_dlg.close()
+
         self.chk_enhance.blockSignals(True)
         self.chk_enhance.setChecked(False)
         self.chk_enhance.blockSignals(False)
