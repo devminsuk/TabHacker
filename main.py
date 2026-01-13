@@ -2783,6 +2783,7 @@ class MainWindow(QMainWindow):
         self.last_cut_points = None
         self.is_worker_busy = False
         self.is_easter_egg_active = False
+        self.is_first_capture = False
 
         self.font_bold_family = "Arial"
         self.font_regular_family = "Arial"
@@ -3517,6 +3518,7 @@ class MainWindow(QMainWindow):
         self.current_scroll_filename = None
         self.sig_reset_worker.emit()
         self.editor_widget.clear_image_cache()
+        self.is_first_capture = True
         
         if not os.path.exists(OUTPUT_FOLDER):
             os.makedirs(OUTPUT_FOLDER)
@@ -3658,8 +3660,13 @@ class MainWindow(QMainWindow):
             # 스크롤 모드일 경우: 캡처 전 인디케이터 숨김
             if is_scroll_mode and self.area_indicator:
                 self.area_indicator.hide()
-                QApplication.processEvents()
-                time.sleep(0.2)
+                
+                wait_time = 0.5 if self.is_first_capture else 0.2
+                t_end = time.time() + wait_time
+                while time.time() < t_end:
+                    QApplication.processEvents()
+                    time.sleep(0.01)
+                if self.is_first_capture: self.is_first_capture = False
 
             # 화면 캡처 (Global Coordinates)
             pixmap = grab_screen_area(self.capture_area_dict['left'], self.capture_area_dict['top'], w, h)
@@ -3700,8 +3707,13 @@ class MainWindow(QMainWindow):
         # 인디케이터 숨기고 캡처
         if self.area_indicator:
             self.area_indicator.hide()
-            QApplication.processEvents()
-            time.sleep(0.1)
+            
+            wait_time = 0.5 if self.is_first_capture else 0.1
+            t_end = time.time() + wait_time
+            while time.time() < t_end:
+                QApplication.processEvents()
+                time.sleep(0.01)
+            if self.is_first_capture: self.is_first_capture = False
 
         pixmap_clean = grab_screen_area(self.capture_area_dict['left'], self.capture_area_dict['top'], 
                                        self.capture_area_dict['width'], self.capture_area_dict['height'])
