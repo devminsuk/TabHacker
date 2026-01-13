@@ -29,6 +29,15 @@ MOON_ICON_PATH = os.path.join(BASE_DIR, "assets", "moon.svg")
 COMPACT_ICON_PATH = os.path.join(BASE_DIR, "assets", "compact.svg")
 EXPAND_ICON_PATH = os.path.join(BASE_DIR, "assets", "expand.svg")
 
+# 앱 상수
+APP_TITLE = "Score Capture Pro"
+APP_WINDOW_TITLE = "Score Capture Pro - 화면 악보 자동 캡처"
+
+# 이스터 에그 상수
+EASTER_EGG_TITLE = "내 시그나 사라"
+EASTER_EGG_IMAGE_PATH = os.path.join(BASE_DIR, "assets", "BuyMySignature.png")
+EASTER_EGG_TRIGGER_COUNT = 5
+
 def load_version_info():
     """version.json 파일 로드"""
     json_path = os.path.join(BASE_DIR, "version.json")
@@ -812,6 +821,193 @@ QSlider::handle:horizontal:hover {
 }
 """
 
+EASTER_EGG_STYLE = """
+/* 이스터 에그 스타일 */
+QMainWindow, QDialog {
+    background-color: #000000;
+}
+
+QWidget {
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    color: #00ff00;
+}
+
+QGroupBox {
+    background-color: #001000;
+    border: 1px solid #00ff00;
+    color: #00ff00;
+    margin-top: 10px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 5px;
+    color: #00ff00;
+}
+
+QLineEdit, QComboBox, QSpinBox {
+    background-color: #000000;
+    border: 1px solid #00ff00;
+    color: #00ff00;
+    selection-background-color: #00ff00;
+    selection-color: #000000;
+}
+
+QPushButton {
+    background-color: #000000;
+    border: 1px solid #00ff00;
+    color: #00ff00;
+    font-weight: bold;
+    padding: 5px;
+}
+
+QPushButton:hover {
+    background-color: #00ff00;
+    color: #000000;
+}
+
+QPushButton:pressed {
+    background-color: #008800;
+    color: #000000;
+}
+
+QListWidget {
+    background-color: #000000;
+    border: 1px solid #00ff00;
+    color: #00ff00;
+    outline: none;
+}
+
+QListWidget::item {
+    border: 1px solid #00ff00;
+    margin: 2px;
+    padding: 4px;
+}
+
+QListWidget::item:selected {
+    background-color: #00ff00;
+    color: #000000;
+}
+
+QLabel {
+    color: #00ff00;
+}
+
+QLabel#previewLabel {
+    border: 2px dashed #00ff00;
+    border-radius: 10px;
+    padding: 6px;
+}
+
+QLabel#miniPreviewLabel {
+    border: 1px solid #00ff00;
+    border-radius: 4px;
+}
+
+QLabel#statusLabel {
+    border: 2px dashed #00ff00;
+    border-radius: 4px;
+    padding: 6px;
+}
+
+QScrollBar:vertical {
+    background: #000000;
+    border-left: 1px solid #00ff00;
+}
+QScrollBar::handle:vertical {
+    background: #00ff00;
+}
+"""
+
+def apply_window_theme(widget, parent=None):
+    """부모 창의 상태(테마, 이스터에그)를 기반으로 윈도우 테마 적용"""
+    theme = "light"
+    target = parent if parent else QApplication.activeWindow()
+    
+    if target:
+        win = target.window()
+        if hasattr(win, "is_easter_egg_active") and win.is_easter_egg_active:
+            theme = "dark"
+        elif hasattr(win, "current_theme"):
+            theme = win.current_theme
+        else:
+            theme = get_system_theme()
+    else:
+        theme = get_system_theme()
+    
+    set_window_theme(widget, theme)
+
+def set_window_theme(widget, theme_str):
+    """윈도우 타이틀바 색상 변경 (Windows DWM & macOS)"""
+    if sys.platform == "win32":
+        try:
+            from ctypes import windll, c_int, byref, sizeof
+            hwnd = int(widget.winId())
+            is_dark = 1 if theme_str == "dark" else 0
+            # DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+            windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 
+                20, 
+                byref(c_int(is_dark)), 
+                sizeof(c_int)
+            )
+        except Exception:
+            pass
+    elif sys.platform == "darwin":
+        try:
+            import ctypes.util
+            libobjc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("objc"))
+            c_void_p = ctypes.c_void_p
+            c_char_p = ctypes.c_char_p
+            
+            objc_getClass = libobjc.objc_getClass
+            objc_getClass.restype = c_void_p
+            objc_getClass.argtypes = [c_char_p]
+            
+            sel_registerName = libobjc.sel_registerName
+            sel_registerName.restype = c_void_p
+            sel_registerName.argtypes = [c_char_p]
+            
+            objc_msgSend = libobjc.objc_msgSend
+            objc_msgSend.restype = c_void_p
+            
+            def _utf8(s): return s.encode('utf-8')
+            
+            ns_view = c_void_p(int(widget.winId()))
+            
+            objc_msgSend.argtypes = [c_void_p, c_void_p]
+            ns_window = objc_msgSend(ns_view, sel_registerName(_utf8("window")))
+            
+            if ns_window:
+                style = "NSAppearanceNameDarkAqua" if theme_str == "dark" else "NSAppearanceNameAqua"
+                
+                objc_msgSend.argtypes = [c_void_p, c_void_p, c_char_p]
+                ns_str = objc_msgSend(objc_getClass(_utf8("NSString")), sel_registerName(_utf8("stringWithUTF8String:")), _utf8(style))
+                
+                objc_msgSend.argtypes = [c_void_p, c_void_p, c_void_p]
+                appearance = objc_msgSend(objc_getClass(_utf8("NSAppearance")), sel_registerName(_utf8("appearanceNamed:")), ns_str)
+                
+                objc_msgSend(ns_window, sel_registerName(_utf8("setAppearance:")), appearance)
+        except Exception:
+            pass
+
+def show_message(parent, title, text, icon=QMessageBox.Icon.Information, buttons=QMessageBox.StandardButton.Ok, default_button=None, detailed_text=None):
+    """테마가 적용된 메시지 박스 표시"""
+    msg = QMessageBox(parent)
+    msg.setWindowTitle(title)
+    msg.setText(text)
+    msg.setIcon(icon)
+    msg.setStandardButtons(buttons)
+    if default_button:
+        msg.setDefaultButton(default_button)
+    if detailed_text:
+        msg.setDetailedText(detailed_text)
+    
+    apply_window_theme(msg, parent)
+    return msg.exec()
+
 def grab_screen_area(x, y, w, h):
     """멀티 모니터 지원 화면 캡처"""
     screens = QApplication.screens()
@@ -1337,12 +1533,16 @@ class ScrollSlicerDialog(QDialog):
             QTimer.singleShot(100, lambda: self.ask_restore(initial_points))
         else:
             QTimer.singleShot(100, self.run_auto_detect)
+            
+        apply_window_theme(self, parent)
 
     def ask_restore(self, points):
-        reply = QMessageBox.question(
+        reply = show_message(
             self, "이전 편집 복구", 
             "이전에 편집했던 자르기 위치를 불러오시겠습니까?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes
+            QMessageBox.Icon.Question,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+            QMessageBox.StandardButton.Yes
         )
         if reply == QMessageBox.StandardButton.Yes:
             self.canvas.set_cut_points(points)
@@ -1528,6 +1728,8 @@ class ImageDetailDialog(QDialog):
         btn_close.clicked.connect(self.close)
         btn_close.setMinimumHeight(40)
         layout.addWidget(btn_close)
+        
+        apply_window_theme(self, parent)
 
 class ImageEnhancerWorker(QObject):
     progress = Signal(int)
@@ -1799,7 +2001,7 @@ class ScoreEditorWidget(QWidget):
             if not (0 <= val <= 200):
                 raise ValueError
         except ValueError:
-            QMessageBox.warning(self, "입력 오류", "여백은 0 ~ 200px 사이여야 합니다.\n기본값(60)으로 초기화됩니다.")
+            show_message(self, "입력 오류", "여백은 0 ~ 200px 사이여야 합니다.\n기본값(60)으로 초기화됩니다.", QMessageBox.Icon.Warning)
             self.margin_edit.setText(DEFAULT_MARGIN)
 
     def validate_spacing(self):
@@ -1809,7 +2011,7 @@ class ScoreEditorWidget(QWidget):
             if not (0 <= val <= 200):
                 raise ValueError
         except ValueError:
-            QMessageBox.warning(self, "입력 오류", "간격은 0 ~ 200px 사이여야 합니다.\n기본값(40)으로 초기화됩니다.")
+            show_message(self, "입력 오류", "간격은 0 ~ 200px 사이여야 합니다.\n기본값(40)으로 초기화됩니다.", QMessageBox.Icon.Warning)
             self.spacing_edit.setText(DEFAULT_SPACING)
 
     def set_font_families(self, bold_family, regular_family):
@@ -2082,7 +2284,7 @@ class ScoreEditorWidget(QWidget):
                     
                     qr_height_val = qr_size
                 except Exception as e:
-                    QMessageBox.warning(self, "QR 코드 오류", f"QR 코드 생성 중 오류가 발생했습니다:\n{e}")
+                    show_message(self, "QR 코드 오류", f"QR 코드 생성 중 오류가 발생했습니다:\n{e}", QMessageBox.Icon.Warning)
 
             if title or composer or bpm:
                 if title:
@@ -2258,7 +2460,7 @@ class ScoreEditorWidget(QWidget):
                     lbl_num.show()
 
         except Exception as e:
-            QMessageBox.warning(self, "미리보기 오류", f"미리보기 생성 중 오류가 발생했습니다:\n{e}")
+            show_message(self, "미리보기 오류", f"미리보기 생성 중 오류가 발생했습니다:\n{e}", QMessageBox.Icon.Warning)
 
 class CaptureWorker(QObject):
     """캡처 및 이미지 처리를 담당하는 워커 스레드"""
@@ -2427,25 +2629,29 @@ class UpdateChecker(QThread):
             return v1 > v2
 
 class AboutDialog(QDialog):
-    def __init__(self, parent=None):
+    easter_egg_activated = Signal()
+
+    def __init__(self, parent=None, is_secret_active=False):
         super().__init__(parent)
         self.setWindowTitle("정보")
         self.resize(300, 250)
         layout = QVBoxLayout(self)
         
+        self.click_count = 0
+        self.last_click_time = 0
+        self.is_secret_active = is_secret_active
+        
         # 로고 이미지
-        logo_lbl = QLabel()
-        if os.path.exists(ICON_PNG_PATH):
-            pm = QPixmap(ICON_PNG_PATH)
-            logo_lbl.setPixmap(pm.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        logo_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(logo_lbl)
+        self.logo_lbl = ClickableLabel()
+        self.logo_lbl.clicked.connect(self.activate_easter_egg)
+        self.logo_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.logo_lbl)
         
         # 제목 및 버전 정보
-        title = QLabel("Score Capture Pro")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; margin-top: 10px;")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
+        self.title_lbl = QLabel()
+        self.title_lbl.setStyleSheet("font-size: 16px; font-weight: bold; margin-top: 10px;")
+        self.title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.title_lbl)
         
         ver = QLabel(f"Version {VERSION_INFO.get('version', '1.0.0')}")
         ver.setStyleSheet("color: #888; margin-bottom: 10px;")
@@ -2470,6 +2676,43 @@ class AboutDialog(QDialog):
         btn_ok = QPushButton("확인")
         btn_ok.clicked.connect(self.accept)
         layout.addWidget(btn_ok)
+        
+        self.update_ui_state(is_secret_active)
+        apply_window_theme(self, parent)
+
+    def update_ui_state(self, is_secret):
+        """상태에 따라 UI 업데이트 (일반 모드/이스터 에그)"""
+        target_path = ICON_PNG_PATH
+        title_text = APP_TITLE
+        
+        if is_secret:
+            secret_path = EASTER_EGG_IMAGE_PATH
+            if os.path.exists(secret_path):
+                target_path = secret_path
+            title_text = EASTER_EGG_TITLE
+            self.setStyleSheet(EASTER_EGG_STYLE)
+            set_window_theme(self, "dark")
+
+        if os.path.exists(target_path):
+            pm = QPixmap(target_path)
+            self.logo_lbl.setPixmap(pm.scaled(64, 64, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        
+        self.title_lbl.setText(title_text)
+
+    def activate_easter_egg(self):
+        import base64
+        current_time = time.time()
+        # 0.5초 이내에 연속 클릭하지 않으면 카운트 초기화
+        if current_time - self.last_click_time > 0.5:
+            self.click_count = 0
+        self.last_click_time = current_time
+        self.click_count += 1
+        
+        if self.click_count >= EASTER_EGG_TRIGGER_COUNT:
+            self.click_count = 0
+            self.is_secret_active = True
+            self.easter_egg_activated.emit()
+            self.update_ui_state(True)
 
 class MainWindow(QMainWindow):
     # 워커 스레드 통신용 시그널
@@ -2479,7 +2722,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Score Capture Pro - 화면 악보 자동 캡처")
+        self.setWindowTitle(APP_WINDOW_TITLE)
         if os.path.exists(ICON_PATH):
             self.setWindowIcon(QIcon(ICON_PATH))
         self.resize(1200, 700)
@@ -2502,6 +2745,7 @@ class MainWindow(QMainWindow):
         self.last_stitched_image = None
         self.last_cut_points = None
         self.is_worker_busy = False
+        self.is_easter_egg_active = False
 
         self.font_bold_family = "Arial"
         self.font_regular_family = "Arial"
@@ -2524,6 +2768,8 @@ class MainWindow(QMainWindow):
 
     def watch_system_theme(self):
         """시스템 테마 변경을 확인하여 반영"""
+        if self.is_easter_egg_active:
+            return
         sys_theme = get_system_theme()
         if sys_theme != self.last_system_theme:
             self.last_system_theme = sys_theme
@@ -2534,6 +2780,38 @@ class MainWindow(QMainWindow):
 
     def update_ui_state(self):
         """UI 상태(미니모드/캡처중)에 따라 버튼 스타일과 텍스트 업데이트"""
+        if self.is_easter_egg_active:
+            is_mini = self.btn_mini.isChecked()
+            is_capturing = self.is_capturing
+            
+            if is_mini:
+                self.btn_capture.setFixedHeight(32)
+                self.btn_capture.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                self.btn_capture.setText("중지" if is_capturing else "2. 캡처")
+                self.btn_capture.setStyleSheet("background-color: #000000; color: #00ff00; border: 1px solid #00ff00; font-weight: bold;")
+                
+                self.btn_select.setText("1. 영역")
+                self.btn_select.setFixedHeight(32)
+                self.btn_select.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+                self.btn_select.setStyleSheet("background-color: #000000; color: #00ff00; border: 1px solid #00ff00; font-weight: bold;")
+            else:
+                self.btn_capture.setMinimumHeight(42)
+                self.btn_capture.setMaximumHeight(16777215)
+                self.btn_capture.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+                self.btn_capture.setStyleSheet("")
+                
+                if is_capturing:
+                    self.btn_capture.setText("■ 캡처 중지")
+                else:
+                    self.btn_capture.setText("2. 캡처 시작")
+                
+                self.btn_select.setText("1. 영역 선택")
+                self.btn_select.setMinimumHeight(36)
+                self.btn_select.setMaximumHeight(16777215)
+                self.btn_select.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+                self.btn_select.setStyleSheet("")
+            return
+
         is_mini = self.btn_mini.isChecked()
         is_capturing = self.is_capturing
         
@@ -2611,6 +2889,8 @@ class MainWindow(QMainWindow):
 
     def apply_stylesheet(self):
         """현재 테마에 맞는 스타일시트 적용"""
+        if self.is_easter_egg_active:
+            return
         style = DARK_STYLE if self.current_theme == "dark" else LIGHT_STYLE
         
         if self.font_regular_family != "Arial":
@@ -2620,63 +2900,15 @@ class MainWindow(QMainWindow):
 
     def update_title_bar_color(self):
         """타이틀바 색상 변경"""
-        if sys.platform == "win32":
-            try:
-                from ctypes import windll, c_int, byref, sizeof
-                
-                hwnd = int(self.winId())
-                is_dark = 1 if self.current_theme == "dark" else 0
-                
-                # DWMWA_USE_IMMERSIVE_DARK_MODE = 20
-                windll.dwmapi.DwmSetWindowAttribute(
-                    hwnd, 
-                    20, 
-                    byref(c_int(is_dark)), 
-                    sizeof(c_int)
-                )
-            except Exception:
-                pass
-        elif sys.platform == "darwin":
-            try:
-                import ctypes.util
-                
-                libobjc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("objc"))
-                c_void_p = ctypes.c_void_p
-                c_char_p = ctypes.c_char_p
-                
-                objc_getClass = libobjc.objc_getClass
-                objc_getClass.restype = c_void_p
-                objc_getClass.argtypes = [c_char_p]
-                
-                sel_registerName = libobjc.sel_registerName
-                sel_registerName.restype = c_void_p
-                sel_registerName.argtypes = [c_char_p]
-                
-                objc_msgSend = libobjc.objc_msgSend
-                objc_msgSend.restype = c_void_p
-                
-                def _utf8(s): return s.encode('utf-8')
-                
-                ns_view = c_void_p(int(self.winId()))
-                
-                objc_msgSend.argtypes = [c_void_p, c_void_p]
-                ns_window = objc_msgSend(ns_view, sel_registerName(_utf8("window")))
-                
-                if ns_window:
-                    style = "NSAppearanceNameDarkAqua" if self.current_theme == "dark" else "NSAppearanceNameAqua"
-                    
-                    objc_msgSend.argtypes = [c_void_p, c_void_p, c_char_p]
-                    ns_str = objc_msgSend(objc_getClass(_utf8("NSString")), sel_registerName(_utf8("stringWithUTF8String:")), _utf8(style))
-                    
-                    objc_msgSend.argtypes = [c_void_p, c_void_p, c_void_p]
-                    appearance = objc_msgSend(objc_getClass(_utf8("NSAppearance")), sel_registerName(_utf8("appearanceNamed:")), ns_str)
-                    
-                    objc_msgSend(ns_window, sel_registerName(_utf8("setAppearance:")), appearance)
-            except Exception:
-                pass
+        if self.is_easter_egg_active:
+            set_window_theme(self, "dark")
+        else:
+            set_window_theme(self, self.current_theme)
 
     def toggle_theme(self):
         """테마 토글 (라이트 ↔ 다크)"""
+        if self.is_easter_egg_active:
+            return
         self.current_theme = "dark" if self.current_theme == "light" else "light"
         
         # 버튼 아이콘 변경
@@ -2711,7 +2943,10 @@ class MainWindow(QMainWindow):
         tooltip = "일반 모드로 전환" if is_mini else "미니 모드로 전환"
         
         # 테마에 따른 색상 설정
-        color = "#333333" if self.current_theme == "light" else "#e0e0e0"
+        if self.is_easter_egg_active:
+            color = "#00ff00"
+        else:
+            color = "#333333" if self.current_theme == "light" else "#e0e0e0"
         self.btn_mini.setIcon(self.create_colored_icon(icon_path, color))
         self.btn_mini.setIconSize(QSize(20, 20))
         self.btn_mini.setToolTip(tooltip)
@@ -2755,7 +2990,7 @@ class MainWindow(QMainWindow):
                 logo_lbl.setFixedSize(24, 24)
                 self.header_layout.addWidget(logo_lbl)
 
-        header_label = QLabel("Score Capture Pro")
+        header_label = QLabel(APP_TITLE)
         header_label.setObjectName("headerLabel")
         self.header_layout.addWidget(header_label)
         
@@ -3021,7 +3256,7 @@ class MainWindow(QMainWindow):
             if not (0.0 <= val <= 1.0):
                 raise ValueError
         except ValueError:
-            QMessageBox.warning(self, "입력 오류", "민감도는 0.0 ~ 1.0 사이여야 합니다.\n기본값(0.9)으로 초기화됩니다.")
+            show_message(self, "입력 오류", "민감도는 0.0 ~ 1.0 사이여야 합니다.\n기본값(0.9)으로 초기화됩니다.", QMessageBox.Icon.Warning)
             self.sensitivity_input.setText(DEFAULT_SENSITIVITY)
 
     def validate_delay(self):
@@ -3031,7 +3266,7 @@ class MainWindow(QMainWindow):
             if not (0 <= val <= 60):
                 raise ValueError
         except ValueError:
-            QMessageBox.warning(self, "입력 오류", "딜레이는 0 ~ 60초 사이여야 합니다.\n기본값(3)으로 초기화됩니다.")
+            show_message(self, "입력 오류", "딜레이는 0 ~ 60초 사이여야 합니다.\n기본값(3)으로 초기화됩니다.", QMessageBox.Icon.Warning)
             self.delay_input.setText(DEFAULT_DELAY)
 
     def toggle_mini_mode(self, checked):
@@ -3212,9 +3447,11 @@ class MainWindow(QMainWindow):
         """캡처 시작/중지 토글"""
         if not self.is_capturing:
             if self.captured_files:
-                reply = QMessageBox.question(self, '새 캡처 시작', 
-                                           '새로운 캡처를 시작하면 기존 캡처 데이터가 모두 삭제됩니다.\n계속하시겠습니까?',
-                                           QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+                reply = show_message(self, '새 캡처 시작', 
+                                   '새로운 캡처를 시작하면 기존 캡처 데이터가 모두 삭제됩니다.\n계속하시겠습니까?',
+                                   QMessageBox.Icon.Question,
+                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                                   QMessageBox.StandardButton.No)
                 if reply != QMessageBox.StandardButton.Yes:
                     return
             self.start_capture()
@@ -3327,11 +3564,12 @@ class MainWindow(QMainWindow):
         
         should_clear = False
         if self.list_widget.count() > 0:
-            reply = QMessageBox.question(
+            reply = show_message(
                 self, 
                 "다시 자르기", 
                 "기존 캡처 목록을 초기화하시겠습니까?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.Icon.Question,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
                 QMessageBox.StandardButton.Yes
             )
             
@@ -3405,7 +3643,7 @@ class MainWindow(QMainWindow):
             self.sig_process_frame.emit(img_bgr, mode, sensitivity)
             
         except Exception as e:
-            QMessageBox.critical(self, "캡처 오류", f"화면 캡처 중 오류가 발생했습니다:\n{e}")
+            show_message(self, "캡처 오류", f"화면 캡처 중 오류가 발생했습니다:\n{e}", QMessageBox.Icon.Critical)
             self.status_label.setText(f"캡처 오류")
             self.is_worker_busy = False
 
@@ -3414,7 +3652,7 @@ class MainWindow(QMainWindow):
         self.is_worker_busy = False
 
     def show_error_message(self, message):
-        QMessageBox.warning(self, "오류", message)
+        show_message(self, "오류", message, QMessageBox.Icon.Warning)
 
     def on_request_clean_capture(self):
         """페이지 모드: 변화 감지 시 깨끗한 이미지 캡처 요청"""
@@ -3537,8 +3775,10 @@ class MainWindow(QMainWindow):
         if not items:
             return
             
-        reply = QMessageBox.question(self, '삭제 확인', f'선택한 {len(items)}개의 이미지를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.',
-                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        reply = show_message(self, '삭제 확인', f'선택한 {len(items)}개의 이미지를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.',
+                           QMessageBox.Icon.Question,
+                           QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                           QMessageBox.StandardButton.No)
         if reply != QMessageBox.StandardButton.Yes:
             return
 
@@ -3570,8 +3810,10 @@ class MainWindow(QMainWindow):
 
     def reset_all(self):
         """모든 데이터 초기화 및 캡처 모드 복귀"""
-        reply = QMessageBox.question(self, '초기화 확인', '모든 캡처 데이터를 삭제하고 초기화하시겠습니까?',
-                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        reply = show_message(self, '초기화 확인', '모든 캡처 데이터를 삭제하고 초기화하시겠습니까?',
+                           QMessageBox.Icon.Question,
+                           QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                           QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
             self.current_scroll_chunks = []
             self.last_stitched_image = None
@@ -3903,20 +4145,63 @@ class MainWindow(QMainWindow):
             self.is_saved = True
             self.status_label.setText(f"저장 완료")
             
-            msg = QMessageBox(self)
-            msg.setWindowTitle(msg_title)
-            msg.setText(msg_text)
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setStyleSheet(self.styleSheet())
-            msg.exec()
+            show_message(self, msg_title, msg_text, QMessageBox.Icon.Information)
             
         except Exception as e:
             self.status_label.setText(f"저장 실패")
-            QMessageBox.critical(self, "오류", f"파일 저장 실패:\n{e}")
+            show_message(self, "오류", f"파일 저장 실패:\n{e}", QMessageBox.Icon.Critical)
 
     def show_about_dialog(self):
-        dlg = AboutDialog(self)
+        dlg = AboutDialog(self, is_secret_active=self.is_easter_egg_active)
+        dlg.easter_egg_activated.connect(self.apply_secret_theme)
         dlg.exec()
+
+    def apply_secret_theme(self):
+        self.is_easter_egg_active = True
+        
+        # 1. 아이콘 변경
+        secret_path = EASTER_EGG_IMAGE_PATH
+        if os.path.exists(secret_path):
+            self.setWindowIcon(QIcon(secret_path))
+            logo_lbl = self.findChild(QLabel, "logoLabel")
+            if logo_lbl:
+                pm = QPixmap(secret_path)
+                logo_lbl.setPixmap(pm.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+
+        # 2. 이스터 에그 스타일 적용
+        self.btn_delete.setStyleSheet("")
+        self.btn_reset.setStyleSheet("")
+        self.btn_reslice.setStyleSheet("")
+        self.btn_theme.hide()
+        
+        self.setStyleSheet(EASTER_EGG_STYLE)
+        self.setWindowTitle(EASTER_EGG_TITLE)
+        
+        header_lbl = self.findChild(QLabel, "headerLabel")
+        if header_lbl:
+            header_lbl.setText(EASTER_EGG_TITLE)
+            
+        self.update_ui_state()
+        self.update_mode_icon()
+        self.update_title_bar_color()
+        
+        # 3. 효과음 및 윈도우 흔들기 효과
+        QApplication.beep()
+        self.shake_window()
+
+    def shake_window(self):
+        """윈도우 흔들기 애니메이션"""
+        anim = QPropertyAnimation(self, b"pos")
+        anim.setDuration(500)
+        anim.setLoopCount(1)
+        start_pos = self.pos()
+        for i in range(0, 11):
+            step = i / 10.0
+            offset = 15 if i % 2 == 1 else -15
+            if i == 0 or i == 10: offset = 0
+            anim.setKeyValueAt(step, start_pos + QPoint(offset, 0))
+        self._shake_anim = anim
+        anim.start()
 
     def show_update_notification(self, version, url):
         msg = QMessageBox(self)
@@ -3924,14 +4209,17 @@ class MainWindow(QMainWindow):
         msg.setText(f"새로운 버전 ({version})이 출시되었습니다.")
         msg.setInformativeText("업데이트 내용을 확인하고 다운로드하시겠습니까?")
         msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        apply_window_theme(msg, self)
         if msg.exec() == QMessageBox.StandardButton.Yes:
             webbrowser.open(url)
 
     def closeEvent(self, event):
         if self.captured_files and not self.is_saved:
-            reply = QMessageBox.question(self, '종료 확인', 
-                                       '저장되지 않은 캡처 데이터가 있습니다.\n정말로 종료하시겠습니까?',
-                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+            reply = show_message(self, '종료 확인', 
+                               '저장되지 않은 캡처 데이터가 있습니다.\n정말로 종료하시겠습니까?',
+                               QMessageBox.Icon.Question,
+                               QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                               QMessageBox.StandardButton.No)
             if reply != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
@@ -3962,13 +4250,11 @@ def exception_hook(exctype, value, tb):
     
     # GUI 애플리케이션이 실행 중이라면 메시지 박스 표시
     if QApplication.instance():
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Icon.Critical)
-        msg.setWindowTitle("치명적 오류 발생")
-        msg.setText("예기치 않은 오류가 발생하여 프로그램이 종료됩니다.")
-        msg.setInformativeText(str(value))
-        msg.setDetailedText(error_msg)
-        msg.exec()
+        show_message(None, "치명적 오류 발생", 
+                    "예기치 않은 오류가 발생하여 프로그램이 종료됩니다.", 
+                    QMessageBox.Icon.Critical,
+                    QMessageBox.StandardButton.Ok,
+                    detailed_text=error_msg)
     
     # 원래의 훅 호출 (콘솔 출력 등) 후 종료
     sys.__excepthook__(exctype, value, tb)
@@ -3993,11 +4279,7 @@ if __name__ == "__main__":
     if not lock_file.tryLock(100):
         # 락 획득 실패 시, 스테일 락(비정상 종료 잔재)인지 확인 후 제거 시도
         if not lock_file.removeStaleLockFile() or not lock_file.tryLock(100):
-            msg = QMessageBox()
-            msg.setIcon(QMessageBox.Icon.Warning)
-            msg.setWindowTitle("알림")
-            msg.setText("프로그램이 이미 실행 중입니다.")
-            msg.exec()
+            show_message(None, "알림", "프로그램이 이미 실행 중입니다.", QMessageBox.Icon.Warning)
             sys.exit(0)
 
     if os.path.exists(ICON_PATH):

@@ -8,7 +8,8 @@ a = Analysis(
     datas=[
             ('fonts', 'fonts'),
             ('models', 'models'),
-            ('assets', 'assets')
+            ('assets', 'assets'),
+            ('version.json', '.')
         ],
     hiddenimports=[],
     hookspath=[],
