@@ -32,8 +32,8 @@ jobs:
       - name: Build with Nuitka (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          python -m nuitka --standalone --onefile --enable-plugin=pyside6 --enable-plugin=numpy `
-            --windows-disable-console `
+          python -m nuitka --standalone --onefile --enable-plugin=pyside6 --assume-yes-for-downloads `
+            --windows-console-mode=disable `
             --windows-icon-from-ico=assets/icon.ico `
             --include-data-dir=fonts=fonts `
             --include-data-dir=models=models `
@@ -45,14 +45,13 @@ jobs:
       - name: Build with Nuitka (macOS)
         if: matrix.os == 'macos-latest'
         run: |
-          python -m nuitka --standalone --onefile --enable-plugin=pyside6 --enable-plugin=numpy \
-            --macos-disable-console \
+          python -m nuitka --standalone --onefile --enable-plugin=pyside6 --assume-yes-for-downloads \
             --macos-app-icon=assets/icon.png \
             --include-data-dir=fonts=fonts \
             --include-data-dir=models=models \
             --include-data-dir=assets=assets \
             --include-data-file=version.json=version.json \
-            --output-filename=ScoreCapturePro_Mac.bin \
+            --output-filename=ScoreCapturePro \
             main.py
 
       - name: Upload Artifacts
@@ -61,5 +60,5 @@ jobs:
           name: ScoreCapturePro-${{ matrix.os }}
           path: |
             ScoreCapturePro.exe
-            ScoreCapturePro_Mac.bin
+            ScoreCapturePro
           if-no-files-found: ignore
