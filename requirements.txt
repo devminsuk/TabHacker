@@ -6,3 +6,5 @@ imagehash
 qrcode
 PySide6
 pyinstaller
+nuitka
+zstandard
