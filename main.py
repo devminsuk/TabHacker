@@ -1746,22 +1746,29 @@ class ImageEnhancerWorker(QObject):
     def run(self):
         results = {}
         cache_type = 'hq' if self.use_high else 'basic'
-        for i, path in enumerate(self.files):
-            if not self.is_running: break
-            img = imread_unicode(path)
-            if img is not None:
-                res = enhance_score_image(img, use_basic=self.use_basic, use_high=self.use_high)
-                if self.cache_dir:
-                    base_name = os.path.basename(path)
-                    name, ext = os.path.splitext(base_name)
-                    cached_filename = f"{name}_{cache_type}{ext}"
-                    cached_path = os.path.join(self.cache_dir, cached_filename)
-                    if imwrite_unicode(cached_path, res):
-                        results[path] = cached_path
-                else:
-                    results[path] = res
-            self.progress.emit(i + 1)
-        self.finished.emit(results)
+        try:
+            for i, path in enumerate(self.files):
+                if not self.is_running: break
+                try:
+                    img = imread_unicode(path)
+                    if img is not None:
+                        res = enhance_score_image(img, use_basic=self.use_basic, use_high=self.use_high)
+                        if self.cache_dir:
+                            base_name = os.path.basename(path)
+                            name, ext = os.path.splitext(base_name)
+                            cached_filename = f"{name}_{cache_type}{ext}"
+                            cached_path = os.path.join(self.cache_dir, cached_filename)
+                            if imwrite_unicode(cached_path, res):
+                                results[path] = cached_path
+                        else:
+                            results[path] = res
+                except Exception:
+                    pass
+                self.progress.emit(i + 1)
+        except Exception:
+            pass
+        finally:
+            self.finished.emit(results)
 
     def stop(self):
         self.is_running = False
