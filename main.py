@@ -4376,14 +4376,14 @@ if __name__ == "__main__":
     lock_file = QLockFile(lock_file_path)
     lock_file.setStaleLockTime(0)
 
-    # 이전 실행 잔재 정리
-    cleanup_old_temp_folders()
-
     if not lock_file.tryLock(100):
         # 락 획득 실패 시, 스테일 락(비정상 종료 잔재)인지 확인 후 제거 시도
         if not lock_file.removeStaleLockFile() or not lock_file.tryLock(100):
             show_message(None, "알림", "프로그램이 이미 실행 중입니다.", QMessageBox.Icon.Warning)
             sys.exit(0)
+
+    # 이전 실행 잔재 정리
+    cleanup_old_temp_folders()
 
     if os.path.exists(ICON_PATH):
         app.setWindowIcon(QIcon(ICON_PATH))
