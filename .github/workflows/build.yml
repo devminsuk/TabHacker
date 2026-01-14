@@ -48,7 +48,6 @@ jobs:
           python -m nuitka --standalone --enable-plugin=pyside6 --assume-yes-for-downloads \
             --macos-create-app-bundle \
             --macos-disable-console \
-            --macos-app-bundle-id=com.scorecapturepro.app \
             --macos-app-icon=assets/icon.png \
             --include-data-dir=fonts=fonts \
             --include-data-dir=models=models \
@@ -60,6 +59,8 @@ jobs:
           if [ -d "main.app" ]; then
             mv main.app ScoreCapturePro.app
           fi
+
+          plutil -replace CFBundleIdentifier -string "com.scorecapturepro.app" ScoreCapturePro.app/Contents/Info.plist
 
           plutil -replace NSScreenCaptureUsageDescription -string "악보 캡처를 위해 화면 녹화 권한이 필요합니다." ScoreCapturePro.app/Contents/Info.plist
 

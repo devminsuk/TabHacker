@@ -56,7 +56,6 @@ def main():
         macos_args = [
             "--macos-create-app-bundle",
             "--macos-disable-console",
-            "--macos-app-bundle-id=com.scorecapturepro.app",
             "--macos-app-icon=assets/icon.png",
             "--output-filename=ScoreCapturePro"
         ]
@@ -75,19 +74,23 @@ def main():
             print(f"Error: {app_name} not found after build.")
             sys.exit(1)
 
-        print("Updating Info.plist with Screen Capture permissions...")
+        print("Updating Info.plist (Bundle ID & Permissions)...")
         plist_path = os.path.join(app_name, "Contents", "Info.plist")
         
         if os.path.exists(plist_path):
-            plutil_cmd = [
-                "plutil", 
-                "-replace", "NSScreenCaptureUsageDescription", 
+            run_command([
+                "plutil", "-replace", "CFBundleIdentifier", 
+                "-string", "com.scorecapturepro.app", 
+                plist_path
+            ])
+
+            run_command([
+                "plutil", "-replace", "NSScreenCaptureUsageDescription", 
                 "-string", "악보 캡처를 위해 화면 녹화 권한이 필요합니다.", 
                 plist_path
-            ]
-            run_command(plutil_cmd)
+            ])
         else:
-            print(f"Warning: {plist_path} not found. Permission setting skipped.")
+            print(f"Warning: {plist_path} not found. Settings skipped.")
 
         # 압축 (Zip)
         print(f"Zipping {app_name} to {zip_name}...")
