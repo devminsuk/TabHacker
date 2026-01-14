@@ -86,6 +86,8 @@ jobs:
 
           plutil -replace NSScreenCaptureUsageDescription -string "악보 캡처를 위해 화면 녹화 권한이 필요합니다." ScoreCapturePro.app/Contents/Info.plist
 
+          codesign --force --deep --sign - ScoreCapturePro.app
+
           zip -r ScoreCapturePro_Mac.zip ScoreCapturePro.app
 
       - name: Upload Artifacts

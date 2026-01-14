@@ -89,6 +89,12 @@ def main():
                 "-string", "악보 캡처를 위해 화면 녹화 권한이 필요합니다.", 
                 plist_path
             ])
+            
+            print("Re-signing the application to fix 'damaged' error...")
+            run_command([
+                "codesign", "--force", "--deep", "--sign", "-", app_name
+            ])
+            
         else:
             print(f"Warning: {plist_path} not found. Settings skipped.")
 
