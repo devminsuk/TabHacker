@@ -56,6 +56,8 @@ jobs:
             --output-filename=ScoreCapturePro \
             main.py
 
+          mv main.app ScoreCapturePro.app
+
       - name: Zip macOS App
         if: matrix.os == 'macos-latest'
         run: |
