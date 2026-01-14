@@ -31,37 +31,11 @@ jobs:
 
       - name: Build with Nuitka (Windows)
         if: matrix.os == 'windows-latest'
-        run: |
-          python -m nuitka --standalone --onefile --enable-plugin=pyside6 --assume-yes-for-downloads `
-            --windows-console-mode=disable `
-            --windows-icon-from-ico=assets/icon.ico `
-            --include-data-dir=fonts=fonts `
-            --include-data-dir=models=models `
-            --include-data-dir=assets=assets `
-            --include-data-file=version.json=version.json `
-            --output-filename=ScoreCapturePro.exe `
-            main.py
+        run: python build.py
 
       - name: Build with Nuitka (macOS)
         if: matrix.os == 'macos-latest'
-        run: |
-          python -m nuitka --standalone --enable-plugin=pyside6 --assume-yes-for-downloads \
-            --macos-create-app-bundle \
-            --macos-disable-console \
-            --macos-app-icon=assets/icon.png \
-            --include-data-dir=fonts=fonts \
-            --include-data-dir=models=models \
-            --include-data-dir=assets=assets \
-            --include-data-file=version.json=version.json \
-            --output-filename=ScoreCapturePro \
-            main.py
-
-          mv main.app ScoreCapturePro.app
-
-      - name: Zip macOS App
-        if: matrix.os == 'macos-latest'
-        run: |
-          zip -r ScoreCapturePro_Mac.zip ScoreCapturePro.app
+        run: python build.py
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4

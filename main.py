@@ -2809,6 +2809,41 @@ class AboutDialog(QDialog):
             self.easter_egg_activated.emit()
             self.update_ui_state(True)
 
+def check_screen_recording_permission():
+    """macOS 화면 녹화 권한 확인 및 요청"""
+    if sys.platform != "darwin":
+        return True
+        
+    try:
+        import Quartz
+        
+        if hasattr(Quartz, 'CGPreflightScreenCaptureAccess'):
+            if not Quartz.CGPreflightScreenCaptureAccess():
+                if hasattr(Quartz, 'CGRequestScreenCaptureAccess'):
+                    Quartz.CGRequestScreenCaptureAccess()
+                
+                msg = QMessageBox()
+                msg.setWindowTitle("화면 녹화 권한 필요")
+                msg.setText("화면을 캡처하려면 '화면 기록' 권한이 필요합니다.")
+                msg.setInformativeText("시스템 설정에서 권한을 허용한 후 앱을 재시작해주세요.")
+                msg.setIcon(QMessageBox.Icon.Warning)
+                
+                btn_settings = msg.addButton("설정 열기", QMessageBox.ButtonRole.ActionRole)
+                btn_quit = msg.addButton("종료", QMessageBox.ButtonRole.RejectRole)
+                msg.setDefaultButton(btn_settings)
+                
+                msg.setWindowFlags(msg.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+                msg.exec()
+                
+                if msg.clickedButton() == btn_settings:
+                    import subprocess
+                    subprocess.run(["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"])
+                
+                return False
+        return True
+    except Exception:
+        return True
+
 class MainWindow(QMainWindow):
     # 워커 스레드 통신용 시그널
     sig_process_frame = Signal(object, int, float)
@@ -4384,6 +4419,10 @@ if __name__ == "__main__":
 
     # 이전 실행 잔재 정리
     cleanup_old_temp_folders()
+
+    # macOS 화면 녹화 권한 확인
+    if not check_screen_recording_permission():
+        sys.exit(0)
 
     if os.path.exists(ICON_PATH):
         app.setWindowIcon(QIcon(ICON_PATH))
