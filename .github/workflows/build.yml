@@ -25,6 +25,26 @@ jobs:
           python-version: "3.12.2"
           cache: "pip"
 
+      - name: Install ccache (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install ccache
+          echo "PATH=/usr/lib/ccache:$PATH" >> $GITHUB_ENV
+
+      - name: Cache Nuitka Build Artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            main.build
+            *.build
+            ~/.ccache
+            ~/Library/Caches/Nuitka
+            C:\Users\runneradmin\AppData\Local\Nuitka
+          key: ${{ runner.os }}-nuitka-${{ hashFiles('requirements.txt') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-nuitka-${{ hashFiles('requirements.txt') }}-
+            ${{ runner.os }}-nuitka-
+
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
@@ -45,6 +65,8 @@ jobs:
       - name: Build with Nuitka (macOS)
         if: matrix.os == 'macos-latest'
         run: |
+          export NUITKA_CCACHE_BINARY=$(which ccache)
+
           python -m nuitka --standalone --enable-plugin=pyside6 --assume-yes-for-downloads \
             --macos-create-app-bundle \
             --macos-disable-console \
