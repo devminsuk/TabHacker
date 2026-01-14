@@ -31,11 +31,39 @@ jobs:
 
       - name: Build with Nuitka (Windows)
         if: matrix.os == 'windows-latest'
-        run: python build.py
+        run: |
+          python -m nuitka --standalone --onefile --enable-plugin=pyside6 --assume-yes-for-downloads `
+            --windows-console-mode=disable `
+            --windows-icon-from-ico=assets/icon.ico `
+            --include-data-dir=fonts=fonts `
+            --include-data-dir=models=models `
+            --include-data-dir=assets=assets `
+            --include-data-file=version.json=version.json `
+            --output-filename=ScoreCapturePro.exe `
+            main.py
 
       - name: Build with Nuitka (macOS)
         if: matrix.os == 'macos-latest'
-        run: python build.py
+        run: |
+          python -m nuitka --standalone --enable-plugin=pyside6 --assume-yes-for-downloads \
+            --macos-create-app-bundle \
+            --macos-disable-console \
+            --macos-app-bundle-id=com.scorecapturepro.app \
+            --macos-app-icon=assets/icon.png \
+            --include-data-dir=fonts=fonts \
+            --include-data-dir=models=models \
+            --include-data-dir=assets=assets \
+            --include-data-file=version.json=version.json \
+            --output-filename=ScoreCapturePro \
+            main.py
+
+          if [ -d "main.app" ]; then
+            mv main.app ScoreCapturePro.app
+          fi
+
+          plutil -replace NSScreenCaptureUsageDescription -string "악보 캡처를 위해 화면 녹화 권한이 필요합니다." ScoreCapturePro.app/Contents/Info.plist
+
+          zip -r ScoreCapturePro_Mac.zip ScoreCapturePro.app
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4

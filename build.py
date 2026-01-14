@@ -31,7 +31,7 @@ def main():
     print(f"Detected OS: {system_os}")
 
     if system_os == "Windows":
-        # === 2. Windows 설정 (Onefile) ===
+        # === Windows 설정 (Onefile) ===
         print("Starting build for Windows (Onefile)...")
         
         windows_args = [
@@ -47,12 +47,16 @@ def main():
         print("\nBuild Complete! Check 'ScoreCapturePro.exe'")
 
     elif system_os == "Darwin":
-        # === 3. macOS 설정 (App Bundle) ===
+        # === macOS 설정 (App Bundle) ===
         print("Starting build for macOS (App Bundle)...")
+        
+        app_name = "ScoreCapturePro.app"
+        zip_name = "ScoreCapturePro_Mac.zip"
         
         macos_args = [
             "--macos-create-app-bundle",
             "--macos-disable-console",
+            "--macos-app-bundle-id=com.scorecapturepro.app",
             "--macos-app-icon=assets/icon.png",
             "--output-filename=ScoreCapturePro"
         ]
@@ -61,22 +65,37 @@ def main():
         
         run_command(final_cmd)
         
-        expected_app = "ScoreCapturePro.app"
-        default_output = "main.app"
-        
-        if os.path.exists(default_output) and not os.path.exists(expected_app):
-            print(f"Renaming {default_output} to {expected_app}...")
-            shutil.move(default_output, expected_app)
+        if os.path.exists("main.app") and not os.path.exists(app_name):
+            print(f"Renaming main.app to {app_name}...")
+            shutil.move("main.app", app_name)
+        elif os.path.exists(f"ScoreCapturePro.app"):
+            pass
             
-        zip_name = "ScoreCapturePro_Mac.zip"
-        
-        if os.path.exists(expected_app):
-            print(f"Zipping {expected_app} to {zip_name}...")
-            subprocess.run(["zip", "-r", zip_name, expected_app], check=True)
-            print(f"\nBuild Complete! Check '{zip_name}'")
-        else:
-            print(f"Error: {expected_app} not found. Build might have failed.")
+        if not os.path.exists(app_name):
+            print(f"Error: {app_name} not found after build.")
             sys.exit(1)
+
+        print("Updating Info.plist with Screen Capture permissions...")
+        plist_path = os.path.join(app_name, "Contents", "Info.plist")
+        
+        if os.path.exists(plist_path):
+            plutil_cmd = [
+                "plutil", 
+                "-replace", "NSScreenCaptureUsageDescription", 
+                "-string", "악보 캡처를 위해 화면 녹화 권한이 필요합니다.", 
+                plist_path
+            ]
+            run_command(plutil_cmd)
+        else:
+            print(f"Warning: {plist_path} not found. Permission setting skipped.")
+
+        # 압축 (Zip)
+        print(f"Zipping {app_name} to {zip_name}...")
+        if os.path.exists(zip_name):
+            os.remove(zip_name)
+            
+        subprocess.run(["zip", "-r", zip_name, app_name], check=True)
+        print(f"\nBuild Complete! Check '{zip_name}'")
 
     else:
         print(f"Unsupported OS: {system_os}")
