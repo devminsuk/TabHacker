@@ -2521,7 +2521,7 @@ class ScoreEditorWidget(QWidget):
             final_header_height = max(header_offset, qr_height_val)
             
             if final_header_height > 0:
-                current_y += final_header_height + (30 * enhance_ratio)
+                current_y += final_header_height + (40 * enhance_ratio)
 
             # 이미지 배치
             content_width_pdf = base_width - (margin * 2)
@@ -4277,7 +4277,7 @@ class MainWindow(QMainWindow):
 
             final_header_height = max(header_offset, qr_height_val)
             if final_header_height > 0:
-                current_y += final_header_height + int(40 * enhance_ratio)
+                current_y += final_header_height + int(50 * enhance_ratio)
 
             for img in image_objects:
                 if img.width != content_width:
