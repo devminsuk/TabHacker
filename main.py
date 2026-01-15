@@ -4540,8 +4540,8 @@ if __name__ == "__main__":
     cleanup_old_temp_folders()
 
     # macOS 화면 녹화 권한 확인
-    # if not check_screen_recording_permission():
-    #     sys.exit(0)
+    if not check_screen_recording_permission():
+        sys.exit(0)
 
     if os.path.exists(ICON_PATH):
         app.setWindowIcon(QIcon(ICON_PATH))
