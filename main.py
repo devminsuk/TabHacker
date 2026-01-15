@@ -1836,6 +1836,7 @@ class ScoreEditorWidget(QWidget):
         self.basic_cache = {}
         self.font_bold = "Arial"
         self.font_regular = "Arial"
+        self.invert_mode = "both"
         
         # 캐시 디렉토리 설정
         self.cache_dir = os.path.join(OUTPUT_FOLDER, "cache")
@@ -1944,7 +1945,7 @@ class ScoreEditorWidget(QWidget):
 
         self.chk_invert = QCheckBox("다크모드 (색상 반전)")
         self.chk_invert.setChecked(False)
-        self.chk_invert.stateChanged.connect(self.refresh_preview)
+        self.chk_invert.stateChanged.connect(self.on_invert_state_changed)
         
         self.chk_adaptive = QCheckBox("자연스러운 흑백 (스캔 효과)")
         self.chk_adaptive.setChecked(False)
@@ -2040,6 +2041,7 @@ class ScoreEditorWidget(QWidget):
             'enhance': self.chk_enhance.isChecked(),
             'high_quality': self.chk_high_quality.isChecked(),
             'invert': self.chk_invert.isChecked(),
+            'invert_mode': getattr(self, 'invert_mode', 'both'),
             'adaptive': self.chk_adaptive.isChecked()
         }))
         
@@ -2047,6 +2049,76 @@ class ScoreEditorWidget(QWidget):
         btn_layout.addWidget(self.btn_save, 1)
         
         main_layout.addLayout(btn_layout)
+
+    def on_invert_state_changed(self, state):
+        if state == Qt.CheckState.Checked.value:
+            dialog = QDialog(self)
+            dialog.setWindowTitle("다크모드 옵션")
+            dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint | Qt.WindowType.WindowCloseButtonHint)
+            
+            layout = QVBoxLayout(dialog)
+            layout.setSpacing(15)
+            layout.setContentsMargins(20, 20, 20, 20)
+            
+            lbl = QLabel("다크모드 적용 범위를 선택하세요:")
+            lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
+            layout.addWidget(lbl)
+            
+            btn_layout = QVBoxLayout()
+            btn_layout.setSpacing(10)
+            
+            btn_score = QPushButton("악보만 반전 (흰 배경)")
+            btn_score.setMinimumHeight(40)
+            btn_score.setCursor(Qt.CursorShape.PointingHandCursor)
+            
+            btn_bg = QPushButton("배경만 반전 (검은 배경)")
+            btn_bg.setMinimumHeight(40)
+            btn_bg.setCursor(Qt.CursorShape.PointingHandCursor)
+            
+            btn_both = QPushButton("모두 반전 (악보 + 배경)")
+            btn_both.setMinimumHeight(40)
+            btn_both.setCursor(Qt.CursorShape.PointingHandCursor)
+            
+            btn_layout.addWidget(btn_score)
+            btn_layout.addWidget(btn_bg)
+            btn_layout.addWidget(btn_both)
+            layout.addLayout(btn_layout)
+            
+            # 임시 변수 초기화 (기본값 both)
+            self.temp_invert_mode = "both"
+            
+            # 람다 대신 내부 함수 사용 (가독성 유지)
+            def select_score(): 
+                self.temp_invert_mode = "score" 
+                dialog.accept()
+                
+            def select_bg(): 
+                self.temp_invert_mode = "bg" 
+                dialog.accept()
+                
+            def select_both(): 
+                self.temp_invert_mode = "both" 
+                dialog.accept()
+            
+            btn_score.clicked.connect(select_score)
+            btn_bg.clicked.connect(select_bg)
+            btn_both.clicked.connect(select_both)
+            
+            # 테마 적용 함수가 있다면 호출
+            apply_window_theme(dialog, self)
+            
+            # 다이얼로그 실행 및 결과 처리
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.invert_mode = self.temp_invert_mode
+                self.refresh_preview()
+            else:
+                # 취소하거나 닫았을 경우 체크박스 해제 (QTimer를 사용하여 이벤트 루프 정리 후 실행)
+                QTimer.singleShot(0, lambda: self.chk_invert.setChecked(False))
+        
+        # 체크박스가 '해제' 되었을 때
+        else:
+            self.invert_mode = None
+            self.refresh_preview()
 
     def toggle_settings_visibility(self, checked):
         self.settings_container.setVisible(checked)
@@ -2119,6 +2191,7 @@ class ScoreEditorWidget(QWidget):
         self.page_num_pos.setCurrentIndex(0)
         self.chk_enhance.setChecked(False)
         self.chk_invert.setChecked(False)
+        self.invert_mode = "both"
         self.chk_adaptive.setChecked(False)
         self.current_files = []
         self.clear_image_cache()
@@ -2129,7 +2202,9 @@ class ScoreEditorWidget(QWidget):
 
     def show_large_image(self, path):
         if os.path.exists(path):
-            invert = self.chk_invert.isChecked()
+            do_invert = self.chk_invert.isChecked()
+            invert_mode = getattr(self, 'invert_mode', 'both')
+            invert_score = do_invert and (invert_mode in ["score", "both"])
             use_basic = self.chk_enhance.isChecked()
             use_high = self.chk_high_quality.isChecked()
             adaptive = self.chk_adaptive.isChecked()
@@ -2141,9 +2216,9 @@ class ScoreEditorWidget(QWidget):
                 cached_path = self.basic_cache[path]
             
             if cached_path:
-                dlg = ImageDetailDialog(cached_path, use_basic=False, invert=invert, parent=self, image_data=None, adaptive=adaptive)
+                dlg = ImageDetailDialog(cached_path, use_basic=False, invert=invert_score, parent=self, image_data=None, adaptive=adaptive)
             else:
-                dlg = ImageDetailDialog(path, use_basic=use_basic, invert=invert, parent=self, use_high=use_high, adaptive=adaptive)
+                dlg = ImageDetailDialog(path, use_basic=use_basic, invert=invert_score, parent=self, use_high=use_high, adaptive=adaptive)
             dlg.exec()
 
     def trigger_refresh(self):
@@ -2277,9 +2352,14 @@ class ScoreEditorWidget(QWidget):
 
             # 다크모드 설정
             is_invert = self.chk_invert.isChecked()
+            invert_mode = getattr(self, 'invert_mode', 'both')
+            
+            invert_bg = is_invert and (invert_mode in ["bg", "both"])
+            invert_score = is_invert and (invert_mode in ["score", "both"])
+            
             is_adaptive = self.chk_adaptive.isChecked()
-            bg_color_hex = "#000000" if is_invert else "#ffffff"
-            text_color_hex = "#ffffff" if is_invert else "#000000"
+            bg_color_hex = "#000000" if invert_bg else "#ffffff"
+            text_color_hex = "#ffffff" if invert_bg else "#000000"
 
             # 화질 개선 시 여백/간격도 2배로 조정하여 비율 유지
             enhance_ratio = 1
@@ -2350,8 +2430,8 @@ class ScoreEditorWidget(QWidget):
             # QR 코드 생성 및 배치
             if url and qrcode:
                 try:
-                    qr_fill = "white" if is_invert else "black"
-                    qr_back = "black" if is_invert else "white"
+                    qr_fill = "white" if invert_bg else "black"
+                    qr_back = "black" if invert_bg else "white"
                     qr = qrcode.QRCode(box_size=10, border=2)
                     qr.add_data(url)
                     qr.make(fit=True)
@@ -2484,7 +2564,7 @@ class ScoreEditorWidget(QWidget):
                 if is_adaptive:
                     img_cv = apply_natural_grayscale(img_cv)
 
-                if is_invert:
+                if invert_score:
                     img_cv = cv2.bitwise_not(img_cv)
                 
                 pix = cv2_to_qpixmap(img_cv)
@@ -4049,10 +4129,14 @@ class MainWindow(QMainWindow):
             use_basic = metadata.get('enhance', False)
             use_high = metadata.get('high_quality', False)
             do_invert = metadata.get('invert', False)
+            invert_mode = metadata.get('invert_mode', 'both')
             do_adaptive = metadata.get('adaptive', False)
             
-            bg_color = "black" if do_invert else "white"
-            text_fill_color = "white" if do_invert else "black"
+            invert_bg = do_invert and (invert_mode in ["bg", "both"])
+            invert_score = do_invert and (invert_mode in ["score", "both"])
+            
+            bg_color = "black" if invert_bg else "white"
+            text_fill_color = "white" if invert_bg else "black"
 
             image_objects = []
             for f in files:
@@ -4088,12 +4172,12 @@ class MainWindow(QMainWindow):
                         if do_adaptive:
                             processed = apply_natural_grayscale(processed)
 
-                        if do_invert:
+                        if invert_score:
                             processed = cv2.bitwise_not(processed)
                         image_objects.append(Image.fromarray(cv2.cvtColor(processed, cv2.COLOR_BGR2RGB)))
                 else:
                     img = Image.open(f).convert("RGB")
-                    if do_invert:
+                    if invert_score:
                         img = ImageOps.invert(img)
                     image_objects.append(img)
 
@@ -4144,8 +4228,8 @@ class MainWindow(QMainWindow):
             qr_height_val = 0
             if url and qrcode:
                 try:
-                    qr_fill = "white" if do_invert else "black"
-                    qr_back = "black" if do_invert else "white"
+                    qr_fill = "white" if invert_bg else "black"
+                    qr_back = "black" if invert_bg else "white"
                     qr = qrcode.QRCode(box_size=10, border=0)
                     qr.add_data(url)
                     qr.make(fit=True)
@@ -4220,7 +4304,7 @@ class MainWindow(QMainWindow):
             watermark_text = "SCORE CAPTURE PRO"
             
             # 투명도를 위한 색상 설정 (RGBA)
-            if do_invert:
+            if invert_bg:
                 wm_color = (255, 255, 255, 50)  # 다크모드: 흰색 투명
             else:
                 wm_color = (0, 0, 0, 40)        # 라이트모드: 검은색 투명
