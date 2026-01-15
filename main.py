@@ -2317,6 +2317,17 @@ class ScoreEditorWidget(QWidget):
 
     def render_preview_content(self):
         file_paths = self.current_files
+        
+        progress = QProgressDialog("미리보기 갱신 중...", None, 0, len(file_paths), self)
+        progress.setWindowTitle("처리 중")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setCancelButton(None)
+        apply_window_theme(progress, self)
+        if file_paths:
+            progress.show()
+            QApplication.processEvents()
+
         # 기존 위젯 제거
         while self.preview_layout.count():
             item = self.preview_layout.takeAt(0)
@@ -2324,6 +2335,7 @@ class ScoreEditorWidget(QWidget):
                 item.widget().deleteLater()
         
         if not file_paths:
+            progress.close()
             return
 
         try:
@@ -2516,7 +2528,10 @@ class ScoreEditorWidget(QWidget):
             display_content_width = int(content_width_pdf * scale)
             display_margin_left = int(margin * scale)
 
-            for path in file_paths:
+            for i, path in enumerate(file_paths):
+                progress.setValue(i)
+                QApplication.processEvents()
+
                 if not os.path.exists(path):
                     continue
                 
@@ -2621,6 +2636,9 @@ class ScoreEditorWidget(QWidget):
 
         except Exception as e:
             show_message(self, "미리보기 오류", f"미리보기 생성 중 오류가 발생했습니다:\n{e}", QMessageBox.Icon.Warning)
+        finally:
+            progress.setValue(len(file_paths))
+            progress.close()
 
 class CaptureWorker(QObject):
     """캡처 및 이미지 처리를 담당하는 워커 스레드"""
@@ -4099,6 +4117,17 @@ class MainWindow(QMainWindow):
                 ext = ".pdf"
             path += ext
         
+        files = self.get_ordered_files()
+        total_steps = len(files) + 2
+        progress = QProgressDialog("파일 생성 및 저장 중...", None, 0, total_steps, self)
+        progress.setWindowTitle("저장 중")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setCancelButton(None)
+        apply_window_theme(progress, self)
+        progress.show()
+        QApplication.processEvents()
+
         try:
             self.status_label.setText("파일 생성 중...")
             QApplication.processEvents()
@@ -4125,7 +4154,11 @@ class MainWindow(QMainWindow):
             text_fill_color = "white" if invert_bg else "black"
 
             image_objects = []
-            for f in files:
+            for i, f in enumerate(files):
+                progress.setValue(i)
+                progress.setLabelText(f"이미지 처리 중... ({i+1}/{len(files)})")
+                QApplication.processEvents()
+
                 if use_basic or use_high or do_adaptive:
                     cv_img = None
                     if use_high:
@@ -4169,6 +4202,7 @@ class MainWindow(QMainWindow):
 
             if not image_objects:
                 self.status_label.setText("처리할 이미지가 없습니다.")
+                progress.close()
                 return
 
             # 원본 이미지 너비 확인 (비율 계산용)
@@ -4265,6 +4299,10 @@ class MainWindow(QMainWindow):
             if final_header_height > 0:
                 current_y += final_header_height + int(50 * enhance_ratio)
 
+            progress.setValue(len(files))
+            progress.setLabelText("페이지 레이아웃 구성 중...")
+            QApplication.processEvents()
+
             for img in image_objects:
                 if img.width != content_width:
                     new_h = int(img.height * (content_width / img.width))
@@ -4330,6 +4368,10 @@ class MainWindow(QMainWindow):
                 # 원본 페이지에 합성
                 page.paste(txt_layer, (x - 10, y - 10), txt_layer)
 
+            progress.setValue(len(files) + 1)
+            progress.setLabelText("파일 저장 중...")
+            QApplication.processEvents()
+
             if ext == ".pdf":
                 final_pages[0].save(path, save_all=True, append_images=final_pages[1:])
                 msg_title = "PDF 생성 완료"
@@ -4356,9 +4398,13 @@ class MainWindow(QMainWindow):
             self.is_saved = True
             self.status_label.setText(f"저장 완료")
             
+            progress.setValue(total_steps)
+            progress.close()
+            
             show_message(self, msg_title, msg_text, QMessageBox.Icon.Information)
             
         except Exception as e:
+            progress.close()
             self.status_label.setText(f"저장 실패")
             show_message(self, "오류", f"파일 저장 실패:\n{e}", QMessageBox.Icon.Critical)
 
