@@ -2239,22 +2239,8 @@ class ScoreEditorWidget(QWidget):
         self.render_preview_content()
 
     def run_enhancement_worker(self, files):
-        # 작업 내용에 따른 메시지 생성
-        tasks = []
-        if self.chk_high_quality.isChecked():
-            tasks.append("초고화질 변환")
-        elif self.chk_enhance.isChecked():
-            tasks.append("화질 개선")
-            
-        if self.chk_adaptive.isChecked():
-            tasks.append("스캔 효과")
-        if self.chk_invert.isChecked():
-            tasks.append("색상 반전")
-            
-        msg = f"{', '.join(tasks)} 중... (시간이 걸릴 수 있습니다)" if tasks else "이미지 처리 중..."
-        
-        self.progress_dlg = QProgressDialog(msg, "취소", 0, len(files), self)
-        self.progress_dlg.setWindowTitle("처리 중")
+        self.progress_dlg = QProgressDialog("고화질 변환 처리 중... (시간이 걸릴 수 있습니다)", "취소", 0, len(files), self)
+        self.progress_dlg.setWindowTitle("고화질 변환")
         self.progress_dlg.setWindowModality(Qt.WindowModality.WindowModal)
         self.progress_dlg.setMinimumDuration(0)
         self.progress_dlg.setAutoClose(False)
