@@ -3587,6 +3587,9 @@ class MainWindow(QMainWindow):
         self.setWindowOpacity(value / 100.0)
 
     def toggle_selection_mode(self):
+        if not check_screen_recording_permission():
+            return
+
         self.switch_to_capture()
         # 메인 윈도우를 숨겨서 화면 전체를 선택할 수 있게 함
         self.hide()
@@ -4538,10 +4541,6 @@ if __name__ == "__main__":
 
     # 이전 실행 잔재 정리
     cleanup_old_temp_folders()
-
-    # macOS 화면 녹화 권한 확인
-    if not check_screen_recording_permission():
-        sys.exit(0)
 
     if os.path.exists(ICON_PATH):
         app.setWindowIcon(QIcon(ICON_PATH))
