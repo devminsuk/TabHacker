@@ -2901,42 +2901,31 @@ def check_screen_recording_permission():
     try:
         import Quartz
         
-        def is_authorized():
-            if hasattr(Quartz, 'CGPreflightScreenCaptureAccess'):
-                return Quartz.CGPreflightScreenCaptureAccess()
-            return True
-
-        if is_authorized():
-            return True
-
-        while not is_authorized():
-            msg = QMessageBox()
-            msg.setWindowTitle("화면 녹화 권한 필요")
-            msg.setText("화면을 캡처하려면 '화면 기록' 권한이 필요합니다.")
-            msg.setInformativeText("아래 버튼을 눌러 권한을 허용(또는 설정에서 체크)한 뒤\n'다시 확인'을 눌러주세요.")
-            msg.setIcon(QMessageBox.Icon.Warning)
-            
-            btn_settings = msg.addButton("권한 허용 / 설정 열기", QMessageBox.ButtonRole.ActionRole)
-            btn_retry = msg.addButton("다시 확인", QMessageBox.ButtonRole.ActionRole)
-            btn_quit = msg.addButton("종료", QMessageBox.ButtonRole.RejectRole)
-            btn_ignore = msg.addButton("무시하고 계속", QMessageBox.ButtonRole.AcceptRole)
-            msg.setDefaultButton(btn_settings)
-            
-            msg.setWindowFlags(msg.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-            msg.exec()
-            
-            clicked = msg.clickedButton()
-            
-            if clicked == btn_settings:
+        if hasattr(Quartz, 'CGPreflightScreenCaptureAccess'):
+            if not Quartz.CGPreflightScreenCaptureAccess():
                 if hasattr(Quartz, 'CGRequestScreenCaptureAccess'):
                     Quartz.CGRequestScreenCaptureAccess()
-                import subprocess
-                subprocess.run(["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"])
-            elif clicked == btn_retry:
-                continue
-            elif clicked == btn_ignore:
-                return True
-            elif clicked == btn_quit:
+                
+                msg = QMessageBox()
+                msg.setWindowTitle("화면 녹화 권한 필요")
+                msg.setText("화면을 캡처하려면 '화면 기록' 권한이 필요합니다.")
+                msg.setInformativeText("시스템 설정에서 권한을 허용한 후 앱을 재시작해주세요.")
+                msg.setIcon(QMessageBox.Icon.Warning)
+                
+                btn_settings = msg.addButton("설정 열기", QMessageBox.ButtonRole.ActionRole)
+                btn_quit = msg.addButton("종료", QMessageBox.ButtonRole.RejectRole)
+                btn_ignore = msg.addButton("무시하고 계속", QMessageBox.ButtonRole.AcceptRole)
+                msg.setDefaultButton(btn_settings)
+                
+                msg.setWindowFlags(msg.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+                msg.exec()
+                
+                if msg.clickedButton() == btn_settings:
+                    import subprocess
+                    subprocess.run(["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"])
+                elif msg.clickedButton() == btn_ignore:
+                    return True
+                
                 return False
         return True
     except Exception:
